@@ -466,7 +466,7 @@ class ReportParser:
                     value = lines[idx + 1].strip()
                     skip_next = True
                 expenditure.description = value or None
-                context = None
+                context = "description"
 
             elif line.startswith("Type:"):
                 value = line.split(":", 1)[1].strip()
@@ -503,8 +503,24 @@ class ReportParser:
                     context = "address"
                 elif context == "event_address":
                     expenditure.fundraising_event_location.append(line)
+                elif context == "description":
+                    if expenditure.description:
+                        expenditure.description = f"{expenditure.description} {line}".strip()
+                    else:
+                        expenditure.description = line
                 else:
                     expenditure.extra.setdefault("unparsed", []).append(line)
+
+        unparsed_extra = expenditure.extra.get("unparsed")
+        if unparsed_extra:
+            extra_text = " ".join(unparsed_extra)
+            if expenditure.description:
+                expenditure.description = f"{expenditure.description} {extra_text}".strip()
+            else:
+                expenditure.description = extra_text
+            del expenditure.extra["unparsed"]
+            if not expenditure.extra:
+                expenditure.extra = {}
 
         return expenditure
 

@@ -1,0 +1,4 @@
+pypdf
+pandas
+streamlit
+xlsxwriter

@@ -27,10 +27,13 @@ from pypdf import PdfReader
 
 
 _CONTRIBUTION_ENTRY_PATTERN = re.compile(r"Receipt\s+\d{2}-\d+")
+_IN_KIND_ENTRY_PATTERN = re.compile(r"Receipt ID:\s+\d{2}-\d+")
+_OTHER_RECEIPT_ENTRY_PATTERN = re.compile(r"Receipt ID:\s+\d{2}-\d+")
 _EXPENDITURE_ENTRY_PATTERN = re.compile(r"Expense ID:\s+\d{2}-\d+")
 _DATE_LINE_PATTERN = re.compile(
     r"Date\s+(\d{2}/\d{2}/\d{2})\s+Amount:\s*([\d,]+\.\d{2})\s+Cumulative\s+([\d,]+\.\d{2})"
 )
+_SOURCE_TYPE_OVERRIDES = {"PAC": "Individual", "XPAC": "PAC"}
 
 
 def _parse_decimal(value: str) -> Optional[Decimal]:
@@ -50,6 +53,15 @@ def _decimal_to_string(value: Optional[Decimal]) -> Optional[str]:
         return None
     return format(value.quantize(Decimal("0.01")), "f")
 
+
+def _normalize_source_type(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    stripped = value.strip()
+    mapped = _SOURCE_TYPE_OVERRIDES.get(stripped.upper())
+    if mapped is not None:
+        return mapped
+    return stripped
 
 def _looks_like_address(line: str) -> bool:
     """Best-effort signal that a line represents part of a postal address."""
@@ -164,6 +176,124 @@ class ContributionEntry:
 
 
 @dataclass
+class InKindContributionEntry:
+    receipt_id: str
+    category: Optional[str] = None
+    source_type: Optional[str] = None
+    date: Optional[str] = None
+    amount: Optional[Decimal] = None
+    cumulative_amount: Optional[Decimal] = None
+    contributor_name: Optional[str] = None
+    occupation: Optional[str] = None
+    employer: Optional[str] = None
+    address_lines: List[str] = field(default_factory=list)
+    employer_address: List[str] = field(default_factory=list)
+    description: Optional[str] = None
+    limitation_type: Optional[str] = None
+    fundraising_event_name: Optional[str] = None
+    fundraising_event_address: List[str] = field(default_factory=list)
+    page_number: Optional[int] = None
+    extra: dict = field(default_factory=dict)
+    raw_text: Optional[str] = None
+
+    def to_json_dict(self, include_raw: bool = False) -> dict:
+        data = {
+            "receipt_id": self.receipt_id,
+            "category": self.category,
+            "source_type": self.source_type,
+            "date": self.date,
+            "amount": _decimal_to_string(self.amount),
+            "cumulative_amount": _decimal_to_string(self.cumulative_amount),
+            "contributor_name": self.contributor_name,
+            "occupation": self.occupation,
+            "employer": self.employer,
+            "address_lines": self.address_lines,
+            "employer_address": self.employer_address,
+            "description": self.description,
+            "limitation_type": self.limitation_type,
+            "fundraising_event_name": self.fundraising_event_name,
+            "fundraising_event_address": self.fundraising_event_address,
+            "page_number": self.page_number,
+        }
+        if self.extra:
+            data["extra"] = self.extra
+        if include_raw:
+            data["raw_text"] = self.raw_text
+        return data
+
+    def to_csv_row(self) -> dict:
+        return {
+            "receipt_id": self.receipt_id,
+            "category": self.category or "",
+            "source_type": self.source_type or "",
+            "date": self.date or "",
+            "amount": _decimal_to_string(self.amount) or "",
+            "cumulative_amount": _decimal_to_string(self.cumulative_amount) or "",
+            "contributor_name": self.contributor_name or "",
+            "occupation": self.occupation or "",
+            "employer": self.employer or "",
+            "address": " | ".join(self.address_lines),
+            "employer_address": " | ".join(self.employer_address),
+            "description": self.description or "",
+            "limitation_type": self.limitation_type or "",
+            "fundraising_event_name": self.fundraising_event_name or "",
+            "fundraising_event_address": " | ".join(self.fundraising_event_address),
+            "page_number": str(self.page_number or ""),
+            "extra": json.dumps(self.extra) if self.extra else "",
+        }
+
+
+@dataclass
+class OtherReceiptEntry:
+    receipt_id: str
+    category: Optional[str] = None
+    date: Optional[str] = None
+    amount: Optional[Decimal] = None
+    name: Optional[str] = None
+    address_lines: List[str] = field(default_factory=list)
+    fundraising_event_name: Optional[str] = None
+    fundraising_event_address: List[str] = field(default_factory=list)
+    refund_rebate_type: Optional[str] = None
+    page_number: Optional[int] = None
+    extra: dict = field(default_factory=dict)
+    raw_text: Optional[str] = None
+
+    def to_json_dict(self, include_raw: bool = False) -> dict:
+        data = {
+            "receipt_id": self.receipt_id,
+            "category": self.category,
+            "date": self.date,
+            "amount": _decimal_to_string(self.amount),
+            "name": self.name,
+            "address_lines": self.address_lines,
+            "fundraising_event_name": self.fundraising_event_name,
+            "fundraising_event_address": self.fundraising_event_address,
+            "refund_rebate_type": self.refund_rebate_type,
+            "page_number": self.page_number,
+        }
+        if self.extra:
+            data["extra"] = self.extra
+        if include_raw:
+            data["raw_text"] = self.raw_text
+        return data
+
+    def to_csv_row(self) -> dict:
+        return {
+            "receipt_id": self.receipt_id,
+            "category": self.category or "",
+            "date": self.date or "",
+            "amount": _decimal_to_string(self.amount) or "",
+            "name": self.name or "",
+            "address": " | ".join(self.address_lines),
+            "fundraising_event_name": self.fundraising_event_name or "",
+            "fundraising_event_address": " | ".join(self.fundraising_event_address),
+            "refund_rebate_type": self.refund_rebate_type or "",
+            "page_number": str(self.page_number or ""),
+            "extra": json.dumps(self.extra) if self.extra else "",
+        }
+
+
+@dataclass
 class ExpenditureEntry:
     expense_id: str
     category: Optional[str] = None
@@ -230,11 +360,51 @@ class ReportParser:
 
         for idx, page in enumerate(self.reader.pages):
             text = page.extract_text() or ""
-            if "Contributions Schedule" in text:
+            if ("Contributions Schedule" in text) and ("In-Kind Contributions Schedule" not in text):
                 in_contributions = True
-            if "Direct Expenditures Schedule" in text and in_contributions:
-                break
             if in_contributions:
+                if (
+                    ("Other Receipts Schedule" in text and "Contributions Schedule" not in text)
+                    or "In-Kind Contributions Schedule" in text
+                    or "Fundraisers Schedule" in text
+                ):
+                    break
+                if "Direct Expenditures Schedule" in text:
+                    break
+                pages.append((idx, text))
+        return pages
+
+    def _collect_in_kind_pages(self) -> List[Tuple[int, str]]:
+        pages: List[Tuple[int, str]] = []
+        in_in_kind = False
+
+        for idx, page in enumerate(self.reader.pages):
+            text = page.extract_text() or ""
+            if "In-Kind Contributions Schedule" in text:
+                in_in_kind = True
+            if in_in_kind:
+                if "Fundraisers Schedule" in text and "In-Kind Contributions Schedule" not in text:
+                    break
+                if "Direct Expenditures Schedule" in text and "In-Kind Contributions Schedule" not in text:
+                    break
+                pages.append((idx, text))
+        return pages
+
+    def _collect_other_receipt_pages(self) -> List[Tuple[int, str]]:
+        pages: List[Tuple[int, str]] = []
+        in_other_receipts = False
+
+        for idx, page in enumerate(self.reader.pages):
+            text = page.extract_text() or ""
+            if "Other Receipts Schedule" in text:
+                in_other_receipts = True
+            if in_other_receipts:
+                if "In-Kind Contributions Schedule" in text and "Other Receipts Schedule" not in text:
+                    break
+                if "Fundraisers Schedule" in text and "Other Receipts Schedule" not in text:
+                    break
+                if "Direct Expenditures Schedule" in text and "Other Receipts Schedule" not in text:
+                    break
                 pages.append((idx, text))
         return pages
 
@@ -270,6 +440,46 @@ class ReportParser:
 
         return contributions
 
+    def parse_in_kind_contributions(self) -> List[InKindContributionEntry]:
+        pages = self._collect_in_kind_pages()
+        if not pages:
+            logging.info("No in-kind contribution pages located in %s", self.pdf_path)
+            return []
+
+        combined, positions, page_numbers = _combine_pages(pages)
+        matches = list(_IN_KIND_ENTRY_PATTERN.finditer(combined))
+        in_kind_entries: List[InKindContributionEntry] = []
+
+        for idx, match in enumerate(matches):
+            entry_start = match.start()
+            entry_end = matches[idx + 1].start() if idx + 1 < len(matches) else len(combined)
+            entry_text = combined[entry_start:entry_end].strip()
+            page_number = _locate_page(entry_start, positions, page_numbers)
+            entry = self._parse_in_kind_entry(entry_text, page_number)
+            in_kind_entries.append(entry)
+
+        return in_kind_entries
+
+    def parse_other_receipts(self) -> List[OtherReceiptEntry]:
+        pages = self._collect_other_receipt_pages()
+        if not pages:
+            logging.info("No other receipts pages located in %s", self.pdf_path)
+            return []
+
+        combined, positions, page_numbers = _combine_pages(pages)
+        matches = list(_OTHER_RECEIPT_ENTRY_PATTERN.finditer(combined))
+        other_receipts: List[OtherReceiptEntry] = []
+
+        for idx, match in enumerate(matches):
+            entry_start = match.start()
+            entry_end = matches[idx + 1].start() if idx + 1 < len(matches) else len(combined)
+            entry_text = combined[entry_start:entry_end].strip()
+            page_number = _locate_page(entry_start, positions, page_numbers)
+            entry = self._parse_other_receipt_entry(entry_text, page_number)
+            other_receipts.append(entry)
+
+        return other_receipts
+
     def parse_expenditures(self) -> List[ExpenditureEntry]:
         pages = self._collect_expenditure_pages()
         if not pages:
@@ -294,30 +504,45 @@ class ReportParser:
         lines = [_clean_line(line) for line in entry_text.splitlines() if _clean_line(line)]
         contribution = ContributionEntry(receipt_id="", page_number=page_number, raw_text=entry_text)
         context: Optional[str] = None
-        skip_next = False
+        skip_next = 0
 
         for idx, line in enumerate(lines):
             if skip_next:
-                skip_next = False
+                skip_next -= 1
                 continue
 
-            if line.startswith("Receipt "):
-                parts = line.split()
-                contribution.receipt_id = parts[1] if len(parts) > 1 else ""
+            if line.startswith("Receipt ") and re.search(r"\d{2}-\d+", line):
+                id_match = re.search(r"\d{2}-\d+", line)
+                contribution.receipt_id = id_match.group(0) if id_match else ""
                 context = None
 
-            elif line.startswith("Category:"):
-                contribution.category = line.split(":", 1)[1].strip() or None
-                # Many entries include a single-line source descriptor just below the category.
-                if idx + 1 < len(lines):
-                    candidate = lines[idx + 1]
+            elif line.startswith("Receipt Category:") or line.startswith("Category:"):
+                value = line.split(":", 1)[1].strip() if ":" in line else ""
+                consumed = 0
+                next_idx = idx + 1
+                if (not value) and next_idx < len(lines):
+                    candidate = lines[next_idx]
+                    if (
+                        ":" not in candidate
+                        and not candidate.startswith("Date ")
+                        and not candidate.startswith("Receipt ")
+                    ):
+                        value = candidate.strip()
+                        consumed += 1
+                contribution.category = value or None
+                source_idx = idx + 1 + consumed
+                if source_idx < len(lines):
+                    candidate = lines[source_idx]
                     if (
                         ":" not in candidate
                         and not candidate.startswith("Date ")
                         and not candidate.startswith("Receipt ")
                     ):
                         contribution.source_type = candidate.strip()
-                        skip_next = True
+                        consumed += 1
+                if consumed:
+                    skip_next = consumed
+                context = None
 
             elif line.startswith("Date "):
                 match = _DATE_LINE_PATTERN.search(line)
@@ -346,11 +571,19 @@ class ReportParser:
 
             elif line.upper().startswith("OCCUP"):
                 value = line.split(":", 1)[1].strip() if ":" in line else " ".join(line.split()[1:])
-                if not value and idx + 1 < len(lines):
-                    value = lines[idx + 1].strip()
-                    skip_next = True
-                contribution.occupation = value or None
-                context = "address"
+                label_token = "".join(ch for ch in line if ch.isalpha()).upper()
+                if value:
+                    contribution.occupation = (
+                        f"{contribution.occupation} {value}".strip()
+                        if contribution.occupation
+                        else value
+                    )
+                    context = "occupation"
+                else:
+                    if label_token.startswith("OCCUP") and len(line.split()) <= 2:
+                        context = "occupation_pending"
+                    else:
+                        context = "occupation"
 
             elif line.startswith("Employer"):
                 value = line.split(":", 1)[1].strip() if ":" in line else ""
@@ -361,12 +594,30 @@ class ReportParser:
                     and not lines[idx + 1].startswith("Fundraising Event")
                 ):
                     value = lines[idx + 1].strip()
-                    skip_next = True
+                    skip_next = max(skip_next, 1)
                 contribution.employer = value or None
                 context = "employer"
 
+            elif line.startswith("Description:"):
+                value = line.split(":", 1)[1].strip() if ":" in line else ""
+                if not value and idx + 1 < len(lines) and ":" not in lines[idx + 1]:
+                    value = lines[idx + 1].strip()
+                    skip_next = max(skip_next, 1)
+                if value:
+                    contribution.extra["description"] = value
+                context = None
+
+            elif line.startswith("Limitation Type:"):
+                value = line.split(":", 1)[1].strip() if ":" in line else ""
+                if value:
+                    contribution.extra["limitation_type"] = value
+                context = None
+
             elif line.startswith("Fundraising Event"):
                 value = line.split(":", 1)[1].strip() if ":" in line else line[len("Fundraising Event") :].strip()
+                if not value and idx + 1 < len(lines) and ":" not in lines[idx + 1]:
+                    value = lines[idx + 1].strip()
+                    skip_next = max(skip_next, 1)
                 contribution.fundraising_event = value or None
                 context = None
 
@@ -390,7 +641,34 @@ class ReportParser:
                             contribution.extra.setdefault("unparsed", []).append(line)
                             context = None
                     continue
-                if context in {"post_name", "address"}:
+                if context in {"occupation", "occupation_pending"}:
+                    if _looks_like_address(line):
+                        contribution.address_lines.append(line)
+                        context = "address"
+                    else:
+                        addition = line.strip()
+                        if addition:
+                            contribution.occupation = (
+                                f"{contribution.occupation} {addition}".strip()
+                                if contribution.occupation
+                                else addition
+                            )
+                            context = "occupation"
+                    continue
+                if context == "post_name":
+                    if _looks_like_address(line):
+                        contribution.address_lines.append(line)
+                        context = "address"
+                    else:
+                        addition = line.strip()
+                        if addition:
+                            contribution.contributor_name = (
+                                f"{contribution.contributor_name} {addition}".strip()
+                                if contribution.contributor_name
+                                else addition
+                            )
+                    continue
+                if context == "address":
                     contribution.address_lines.append(line)
                     context = "address"
                 elif context == "employer_address":
@@ -414,7 +692,322 @@ class ReportParser:
             if not contribution.extra:
                 contribution.extra = {}
 
+        contribution.source_type = _normalize_source_type(contribution.source_type)
+
         return contribution
+
+    def _parse_in_kind_entry(self, entry_text: str, page_number: int) -> InKindContributionEntry:
+        lines = [_clean_line(line) for line in entry_text.splitlines() if _clean_line(line)]
+        entry = InKindContributionEntry(receipt_id="", page_number=page_number, raw_text=entry_text)
+        context: Optional[str] = None
+        skip_next = 0
+
+        for idx, line in enumerate(lines):
+            if skip_next:
+                skip_next -= 1
+                continue
+
+            if line.startswith("Receipt ID:"):
+                value = line.split(":", 1)[1].strip()
+                entry.receipt_id = value.split()[0] if value else ""
+                context = None
+
+            elif line.startswith("Receipt Category:"):
+                value = line.split(":", 1)[1].strip()
+                consumed = 0
+                if not value and idx + 1 < len(lines):
+                    candidate = lines[idx + 1]
+                    if (
+                        ":" not in candidate
+                        and not candidate.startswith("Date ")
+                        and not candidate.startswith("Receipt ")
+                    ):
+                        value = candidate.strip()
+                        consumed += 1
+                entry.category = value or None
+                source_idx = idx + 1 + consumed
+                if source_idx < len(lines):
+                    candidate = lines[source_idx]
+                    if (
+                        ":" not in candidate
+                        and not candidate.startswith("Date ")
+                        and not candidate.startswith("Receipt ")
+                    ):
+                        entry.source_type = candidate.strip()
+                        consumed += 1
+                if consumed:
+                    skip_next = consumed
+                context = None
+
+            elif line.startswith("Date "):
+                match = _DATE_LINE_PATTERN.search(line)
+                if match:
+                    entry.date = match.group(1)
+                    entry.amount = _parse_decimal(match.group(2))
+                    entry.cumulative_amount = _parse_decimal(match.group(3))
+                else:
+                    tokens = line.replace("Date", "").split()
+                    if tokens:
+                        entry.date = tokens[0]
+                    if "Amount:" in line:
+                        try:
+                            amount_value = line.split("Amount:", 1)[1].split()[0]
+                            entry.amount = _parse_decimal(amount_value)
+                        except IndexError:
+                            pass
+                    if "Cumulative" in line:
+                        cumulative_value = line.split("Cumulative", 1)[1].strip()
+                        entry.cumulative_amount = _parse_decimal(cumulative_value.split()[0])
+                context = None
+
+            elif line.startswith("Name:"):
+                entry.contributor_name = line.split(":", 1)[1].strip() or None
+                context = "post_name"
+
+            elif line.upper().startswith("OCCUP"):
+                value = line.split(":", 1)[1].strip() if ":" in line else " ".join(line.split()[1:])
+                label_token = "".join(ch for ch in line if ch.isalpha()).upper()
+                if value:
+                    entry.occupation = (
+                        f"{entry.occupation} {value}".strip()
+                        if entry.occupation
+                        else value
+                    )
+                    context = "occupation"
+                else:
+                    if label_token.startswith("OCCUP") and len(line.split()) <= 2:
+                        context = "occupation_pending"
+                    else:
+                        context = "occupation"
+
+            elif line.startswith("Employer"):
+                value = line.split(":", 1)[1].strip() if ":" in line else ""
+                if (
+                    not value
+                    and idx + 1 < len(lines)
+                    and ":" not in lines[idx + 1]
+                    and not lines[idx + 1].startswith("Fundraising Event")
+                ):
+                    value = lines[idx + 1].strip()
+                    skip_next = max(skip_next, 1)
+                entry.employer = value or None
+                context = "employer"
+
+            elif line.startswith("Description"):
+                value = line.split(":", 1)[1].strip() if ":" in line else ""
+                if value:
+                    entry.description = (
+                        f"{entry.description} {value}".strip()
+                        if entry.description
+                        else value
+                    )
+                context = "description"
+
+            elif line.startswith("Limitation Type:"):
+                value = line.split(":", 1)[1].strip() if ":" in line else ""
+                if value:
+                    entry.limitation_type = value
+                context = None
+
+            elif line.startswith("Fundraising Event Name"):
+                previous_context = context
+                value = line.split(":", 1)[1].strip() if ":" in line else ""
+                consumed = False
+                if not value and idx + 1 < len(lines):
+                    candidate = lines[idx + 1]
+                    if ":" not in candidate and not _looks_like_address(candidate):
+                        value = candidate.strip()
+                        skip_next = max(skip_next, 1)
+                        consumed = True
+                entry.fundraising_event_name = value or None
+                if value:
+                    context = "fundraising_event"
+                else:
+                    context = previous_context if previous_context == "post_name" and not consumed else None
+
+            else:
+                if context == "employer":
+                    if (
+                        ":" not in line
+                        and not line.startswith("Fundraising Event")
+                        and not _looks_like_address(line)
+                    ):
+                        entry.employer = (
+                            f"{entry.employer} {line}".strip()
+                            if entry.employer
+                            else line
+                        )
+                    else:
+                        if _looks_like_address(line):
+                            entry.employer_address.append(line)
+                            context = "employer_address"
+                        else:
+                            entry.extra.setdefault("unparsed", []).append(line)
+                            context = None
+                    continue
+                if context in {"occupation", "occupation_pending"}:
+                    if _looks_like_address(line):
+                        entry.address_lines.append(line)
+                        context = "address"
+                    else:
+                        addition = line.strip()
+                        if addition:
+                            entry.occupation = (
+                                f"{entry.occupation} {addition}".strip()
+                                if entry.occupation
+                                else addition
+                            )
+                            context = "occupation"
+                    continue
+                if context == "post_name":
+                    if _looks_like_address(line):
+                        entry.address_lines.append(line)
+                        context = "address"
+                    else:
+                        addition = line.strip()
+                        if addition:
+                            entry.contributor_name = (
+                                f"{entry.contributor_name} {addition}".strip()
+                                if entry.contributor_name
+                                else addition
+                            )
+                    continue
+                if context == "address":
+                    entry.address_lines.append(line)
+                    context = "address"
+                elif context == "employer_address":
+                    entry.employer_address.append(line)
+                elif context == "description":
+                    addition = line.strip()
+                    if addition:
+                        entry.description = (
+                            f"{entry.description} {addition}".strip()
+                            if entry.description
+                            else addition
+                        )
+                elif context == "fundraising_event":
+                    if _looks_like_address(line):
+                        entry.fundraising_event_address.append(line)
+                    else:
+                        addition = line.strip()
+                        if addition:
+                            entry.fundraising_event_name = (
+                                f"{entry.fundraising_event_name} {addition}".strip()
+                                if entry.fundraising_event_name
+                                else addition
+                            )
+                elif _looks_like_address(line):
+                    if entry.employer:
+                        entry.employer_address.append(line)
+                        context = "employer_address"
+                    else:
+                        entry.address_lines.append(line)
+                        context = "address"
+                elif entry.category and not entry.source_type:
+                    entry.source_type = line
+                else:
+                    entry.extra.setdefault("unparsed", []).append(line)
+
+        unparsed = entry.extra.get("unparsed")
+        if unparsed:
+            entry.employer_address = unparsed + entry.employer_address
+            del entry.extra["unparsed"]
+            if not entry.extra:
+                entry.extra = {}
+
+        entry.source_type = _normalize_source_type(entry.source_type)
+
+        return entry
+
+    def _parse_other_receipt_entry(self, entry_text: str, page_number: int) -> OtherReceiptEntry:
+        lines = [_clean_line(line) for line in entry_text.splitlines() if _clean_line(line)]
+        entry = OtherReceiptEntry(receipt_id="", page_number=page_number, raw_text=entry_text)
+        context: Optional[str] = None
+        skip_next = 0
+
+        for idx, line in enumerate(lines):
+            if skip_next:
+                skip_next -= 1
+                continue
+
+            if line.startswith("Receipt ID:"):
+                value = line.split(":", 1)[1].strip()
+                entry.receipt_id = value.split()[0] if value else ""
+                context = None
+
+            elif line.startswith("Receipt Category:"):
+                entry.category = line.split(":", 1)[1].strip() or None
+                context = None
+
+            elif line.startswith("Date"):
+                value = line.split(":", 1)[1].strip() if ":" in line else ""
+                entry.date = value or None
+                context = None
+
+            elif line.startswith("Amount:"):
+                entry.amount = _parse_decimal(line.split(":", 1)[1])
+                context = None
+
+            elif line.startswith("Name:"):
+                entry.name = line.split(":", 1)[1].strip() or None
+                context = "post_name"
+
+            elif line.startswith("Fundraising Event Name"):
+                previous_context = context
+                value = line.split(":", 1)[1].strip() if ":" in line else ""
+                consumed = False
+                if not value and idx + 1 < len(lines):
+                    candidate = lines[idx + 1]
+                    if ":" not in candidate and not _looks_like_address(candidate):
+                        value = candidate.strip()
+                        skip_next = max(skip_next, 1)
+                        consumed = True
+                entry.fundraising_event_name = value or None
+                if value:
+                    context = "fundraising_event"
+                else:
+                    context = previous_context if not consumed else previous_context
+
+            elif line.startswith("Refund/Rebate"):
+                value = line.split(":", 1)[1].strip() if ":" in line else ""
+                entry.refund_rebate_type = value or None
+                context = None
+
+            else:
+                if context == "post_name":
+                    if _looks_like_address(line):
+                        entry.address_lines.append(line)
+                        context = "address"
+                    else:
+                        addition = line.strip()
+                        if addition:
+                            entry.name = (
+                                f"{entry.name} {addition}".strip()
+                                if entry.name
+                                else addition
+                            )
+                    continue
+                if context == "address":
+                    entry.address_lines.append(line)
+                    continue
+                if context == "fundraising_event":
+                    if _looks_like_address(line):
+                        entry.fundraising_event_address.append(line)
+                    else:
+                        addition = line.strip()
+                        if addition:
+                            entry.fundraising_event_name = (
+                                f"{entry.fundraising_event_name} {addition}".strip()
+                                if entry.fundraising_event_name
+                                else addition
+                            )
+                    continue
+                if _looks_like_address(line):
+                    entry.address_lines.append(line)
+                else:
+                    entry.extra.setdefault("unparsed", []).append(line)
+
+        return entry
 
     def _parse_expenditure_entry(self, entry_text: str, page_number: int) -> ExpenditureEntry:
         lines = [_clean_line(line) for line in entry_text.splitlines() if _clean_line(line)]
@@ -586,16 +1179,22 @@ def main(args: Optional[Sequence[str]] = None) -> None:
 
     report_parser = ReportParser(pdf_path)
     contributions = report_parser.parse_contributions()
+    other_receipts = report_parser.parse_other_receipts()
+    in_kind_contributions = report_parser.parse_in_kind_contributions()
     expenditures = report_parser.parse_expenditures()
 
     parsed_args.output_dir.mkdir(parents=True, exist_ok=True)
 
     if "json" in parsed_args.formats:
         _write_json(contributions, parsed_args.output_dir / "contributions.json", parsed_args.include_raw)
+        _write_json(other_receipts, parsed_args.output_dir / "other_receipts.json", parsed_args.include_raw)
+        _write_json(in_kind_contributions, parsed_args.output_dir / "in_kind_contributions.json", parsed_args.include_raw)
         _write_json(expenditures, parsed_args.output_dir / "expenditures.json", parsed_args.include_raw)
 
     if "csv" in parsed_args.formats:
         contrib_csv = parsed_args.output_dir / "contributions.csv"
+        other_receipts_csv = parsed_args.output_dir / "other_receipts.csv"
+        inkind_csv = parsed_args.output_dir / "in_kind_contributions.csv"
         exp_csv = parsed_args.output_dir / "expenditures.csv"
         _write_csv(
             [
@@ -619,6 +1218,46 @@ def main(args: Optional[Sequence[str]] = None) -> None:
         )
         _write_csv(
             [
+                "receipt_id",
+                "category",
+                "date",
+                "amount",
+                "name",
+                "address",
+                "fundraising_event_name",
+                "fundraising_event_address",
+                "refund_rebate_type",
+                "page_number",
+                "extra",
+            ],
+            (entry.to_csv_row() for entry in other_receipts),
+            other_receipts_csv,
+        )
+        _write_csv(
+            [
+                "receipt_id",
+                "category",
+                "source_type",
+                "date",
+                "amount",
+                "cumulative_amount",
+                "contributor_name",
+                "occupation",
+                "employer",
+                "address",
+                "employer_address",
+                "description",
+                "limitation_type",
+                "fundraising_event_name",
+                "fundraising_event_address",
+                "page_number",
+                "extra",
+            ],
+            (entry.to_csv_row() for entry in in_kind_contributions),
+            inkind_csv,
+        )
+        _write_csv(
+            [
                 "expense_id",
                 "category",
                 "date",
@@ -638,8 +1277,10 @@ def main(args: Optional[Sequence[str]] = None) -> None:
         )
 
     logging.info(
-        "Parsed %d contribution entries and %d expenditure entries.",
+        "Parsed %d direct contribution entries, %d other receipt entries, %d in-kind contribution entries, and %d expenditure entries.",
         len(contributions),
+        len(other_receipts),
+        len(in_kind_contributions),
         len(expenditures),
     )
 

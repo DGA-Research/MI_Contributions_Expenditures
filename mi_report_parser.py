@@ -712,9 +712,12 @@ class ReportParser:
 
             elif line.startswith("Fundraising Event"):
                 value = line.split(":", 1)[1].strip() if ":" in line else line[len("Fundraising Event") :].strip()
-                if not value and idx + 1 < len(lines) and ":" not in lines[idx + 1]:
-                    value = lines[idx + 1].strip()
-                    skip_next = max(skip_next, 1)
+                if not value and idx + 1 < len(lines):
+                    candidate = lines[idx + 1]
+                    if ":" not in candidate and not _looks_like_address(candidate):
+                        value = candidate.strip()
+                        skip_next = max(skip_next, 1)
+                        consumed = True
                 contribution.fundraising_event = value or None
                 context = None
 

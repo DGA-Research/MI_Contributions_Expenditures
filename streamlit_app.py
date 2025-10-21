@@ -49,19 +49,22 @@ if uploaded_pdf is not None:
             contributions = parser.parse_contributions()
             other_receipts = parser.parse_other_receipts()
             in_kind_contributions = parser.parse_in_kind_contributions()
+            fundraisers = parser.parse_fundraisers()
             expenditures = parser.parse_expenditures()
 
         st.success(
             "Parsed "
             f"{len(contributions)} direct contributions, "
             f"{len(other_receipts)} other receipts, "
-            f"{len(in_kind_contributions)} in-kind contributions, and "
+            f"{len(in_kind_contributions)} in-kind contributions, "
+            f"{len(fundraisers)} fundraisers, and "
             f"{len(expenditures)} expenditures."
         )
 
         contrib_df = _entries_to_dataframe(contributions)
         other_receipts_df = _entries_to_dataframe(other_receipts)
         in_kind_df = _entries_to_dataframe(in_kind_contributions)
+        fundraisers_df = _entries_to_dataframe(fundraisers)
         expend_df = _entries_to_dataframe(expenditures)
 
         st.subheader("Contributions Preview")
@@ -73,6 +76,9 @@ if uploaded_pdf is not None:
         st.subheader("In-Kind Contributions Preview")
         st.dataframe(in_kind_df.head(25), use_container_width=True)
 
+        st.subheader("Fundraisers Preview")
+        st.dataframe(fundraisers_df.head(25), use_container_width=True)
+
         st.subheader("Expenditures Preview")
         st.dataframe(expend_df.head(25), use_container_width=True)
 
@@ -81,6 +87,7 @@ if uploaded_pdf is not None:
             contrib_df.to_excel(writer, sheet_name="Contributions", index=False)
             other_receipts_df.to_excel(writer, sheet_name="Other Receipts", index=False)
             in_kind_df.to_excel(writer, sheet_name="In-Kind Contributions", index=False)
+            fundraisers_df.to_excel(writer, sheet_name="Fundraisers", index=False)
             expend_df.to_excel(writer, sheet_name="Expenditures", index=False)
         output_stream.seek(0)
 

@@ -47,18 +47,31 @@ if uploaded_pdf is not None:
         with st.spinner("Parsing PDF…"):
             parser = ReportParser(tmp_path)
             contributions = parser.parse_contributions()
+            other_receipts = parser.parse_other_receipts()
+            in_kind_contributions = parser.parse_in_kind_contributions()
             expenditures = parser.parse_expenditures()
 
         st.success(
-            f"Parsed {len(contributions)} contribution entries and "
-            f"{len(expenditures)} expenditure entries."
+            "Parsed "
+            f"{len(contributions)} direct contributions, "
+            f"{len(other_receipts)} other receipts, "
+            f"{len(in_kind_contributions)} in-kind contributions, and "
+            f"{len(expenditures)} expenditures."
         )
 
         contrib_df = _entries_to_dataframe(contributions)
+        other_receipts_df = _entries_to_dataframe(other_receipts)
+        in_kind_df = _entries_to_dataframe(in_kind_contributions)
         expend_df = _entries_to_dataframe(expenditures)
 
         st.subheader("Contributions Preview")
         st.dataframe(contrib_df.head(25), use_container_width=True)
+
+        st.subheader("Other Receipts Preview")
+        st.dataframe(other_receipts_df.head(25), use_container_width=True)
+
+        st.subheader("In-Kind Contributions Preview")
+        st.dataframe(in_kind_df.head(25), use_container_width=True)
 
         st.subheader("Expenditures Preview")
         st.dataframe(expend_df.head(25), use_container_width=True)
@@ -66,6 +79,8 @@ if uploaded_pdf is not None:
         output_stream = io.BytesIO()
         with pd.ExcelWriter(output_stream, engine="xlsxwriter") as writer:
             contrib_df.to_excel(writer, sheet_name="Contributions", index=False)
+            other_receipts_df.to_excel(writer, sheet_name="Other Receipts", index=False)
+            in_kind_df.to_excel(writer, sheet_name="In-Kind Contributions", index=False)
             expend_df.to_excel(writer, sheet_name="Expenditures", index=False)
         output_stream.seek(0)
 

@@ -29,6 +29,7 @@ from pypdf import PdfReader
 _CONTRIBUTION_ENTRY_PATTERN = re.compile(r"Receipt\s+\d{2}-\d+")
 _IN_KIND_ENTRY_PATTERN = re.compile(r"Receipt ID:\s+\d{2}-\d+")
 _OTHER_RECEIPT_ENTRY_PATTERN = re.compile(r"Receipt ID:\s+\d{2}-\d+")
+_FUNDRAISER_ENTRY_PATTERN = re.compile(r"Fundraiser ID:\s+\d{2}-\d+")
 _EXPENDITURE_ENTRY_PATTERN = re.compile(r"Expense ID:\s+\d{2}-\d+")
 _DATE_LINE_PATTERN = re.compile(
     r"Date\s+(\d{2}/\d{2}/\d{2})\s+Amount:\s*([\d,]+\.\d{2})\s+Cumulative\s+([\d,]+\.\d{2})"
@@ -294,6 +295,68 @@ class OtherReceiptEntry:
 
 
 @dataclass
+class FundraiserEntry:
+    fundraiser_id: str
+    event_type: Optional[str] = None
+    date_of_event: Optional[str] = None
+    gross_receipts: Optional[Decimal] = None
+    location_name: Optional[str] = None
+    location_address: List[str] = field(default_factory=list)
+    private_residence: Optional[bool] = None
+    number_of_attendees: Optional[int] = None
+    incidental_event_amount: Optional[Decimal] = None
+    total_contributions: Optional[Decimal] = None
+    co_sponsor: Optional[str] = None
+    contribution_split_percent: Optional[str] = None
+    expenditure_split_percent: Optional[str] = None
+    page_number: Optional[int] = None
+    extra: dict = field(default_factory=dict)
+    raw_text: Optional[str] = None
+
+    def to_json_dict(self, include_raw: bool = False) -> dict:
+        data = {
+            "fundraiser_id": self.fundraiser_id,
+            "event_type": self.event_type,
+            "date_of_event": self.date_of_event,
+            "gross_receipts": _decimal_to_string(self.gross_receipts),
+            "location_name": self.location_name,
+            "location_address": self.location_address,
+            "private_residence": self.private_residence,
+            "number_of_attendees": self.number_of_attendees,
+            "incidental_event_amount": _decimal_to_string(self.incidental_event_amount),
+            "total_contributions": _decimal_to_string(self.total_contributions),
+            "co_sponsor": self.co_sponsor,
+            "contribution_split_percent": self.contribution_split_percent,
+            "expenditure_split_percent": self.expenditure_split_percent,
+            "page_number": self.page_number,
+        }
+        if self.extra:
+            data["extra"] = self.extra
+        if include_raw:
+            data["raw_text"] = self.raw_text
+        return data
+
+    def to_csv_row(self) -> dict:
+        return {
+            "fundraiser_id": self.fundraiser_id,
+            "event_type": self.event_type or "",
+            "date_of_event": self.date_of_event or "",
+            "gross_receipts": _decimal_to_string(self.gross_receipts) or "",
+            "location_name": self.location_name or "",
+            "location_address": " | ".join(self.location_address),
+            "private_residence": "" if self.private_residence is None else ("Yes" if self.private_residence else "No"),
+            "number_of_attendees": str(self.number_of_attendees or ""),
+            "incidental_event_amount": _decimal_to_string(self.incidental_event_amount) or "",
+            "total_contributions": _decimal_to_string(self.total_contributions) or "",
+            "co_sponsor": self.co_sponsor or "",
+            "contribution_split_percent": self.contribution_split_percent or "",
+            "expenditure_split_percent": self.expenditure_split_percent or "",
+            "page_number": str(self.page_number or ""),
+            "extra": json.dumps(self.extra) if self.extra else "",
+        }
+
+
+@dataclass
 class ExpenditureEntry:
     expense_id: str
     category: Optional[str] = None
@@ -408,6 +471,20 @@ class ReportParser:
                 pages.append((idx, text))
         return pages
 
+    def _collect_fundraiser_pages(self) -> List[Tuple[int, str]]:
+        pages: List[Tuple[int, str]] = []
+        in_fundraisers = False
+
+        for idx, page in enumerate(self.reader.pages):
+            text = page.extract_text() or ""
+            if "Fundraisers Schedule" in text:
+                in_fundraisers = True
+            if in_fundraisers:
+                if "Direct Expenditures Schedule" in text and "Fundraisers Schedule" not in text:
+                    break
+                pages.append((idx, text))
+        return pages
+
     def _collect_expenditure_pages(self) -> List[Tuple[int, str]]:
         pages: List[Tuple[int, str]] = []
         in_expenditures = False
@@ -479,6 +556,26 @@ class ReportParser:
             other_receipts.append(entry)
 
         return other_receipts
+
+    def parse_fundraisers(self) -> List[FundraiserEntry]:
+        pages = self._collect_fundraiser_pages()
+        if not pages:
+            logging.info("No fundraiser pages located in %s", self.pdf_path)
+            return []
+
+        combined, positions, page_numbers = _combine_pages(pages)
+        matches = list(_FUNDRAISER_ENTRY_PATTERN.finditer(combined))
+        fundraisers: List[FundraiserEntry] = []
+
+        for idx, match in enumerate(matches):
+            entry_start = match.start()
+            entry_end = matches[idx + 1].start() if idx + 1 < len(matches) else len(combined)
+            entry_text = combined[entry_start:entry_end].strip()
+            page_number = _locate_page(entry_start, positions, page_numbers)
+            entry = self._parse_fundraiser_entry(entry_text, page_number)
+            fundraisers.append(entry)
+
+        return fundraisers
 
     def parse_expenditures(self) -> List[ExpenditureEntry]:
         pages = self._collect_expenditure_pages()
@@ -919,6 +1016,124 @@ class ReportParser:
 
         return entry
 
+    def _parse_fundraiser_entry(self, entry_text: str, page_number: int) -> FundraiserEntry:
+        lines = [_clean_line(line) for line in entry_text.splitlines() if _clean_line(line)]
+        entry = FundraiserEntry(fundraiser_id="", page_number=page_number, raw_text=entry_text)
+        context: Optional[str] = None
+        skip_next = 0
+
+        for idx, line in enumerate(lines):
+            if skip_next:
+                skip_next -= 1
+                continue
+
+            if line.startswith("Fundraiser ID:"):
+                entry.fundraiser_id = line.split(":", 1)[1].strip().split()[0]
+                context = None
+
+            elif line.startswith("Type of Event"):
+                value = line.split(":", 1)[1].strip() if ":" in line else ""
+                if not value and idx + 1 < len(lines):
+                    candidate = lines[idx + 1]
+                    if ":" not in candidate and not _looks_like_address(candidate):
+                        value = candidate.strip()
+                        skip_next = max(skip_next, 1)
+                entry.event_type = value or None
+                context = None
+
+            elif line.startswith("Date of Event"):
+                entry.date_of_event = line.split(":", 1)[1].strip() or None
+                context = None
+
+            elif line.startswith("Gross Receipts"):
+                match = re.search(r"([\d,]+\.\d{2})", line)
+                if match:
+                    entry.gross_receipts = _parse_decimal(match.group(1))
+                context = "location_address"
+
+            elif line.startswith("Private Residence"):
+                value = line.split(":", 1)[1].strip() if ":" in line else ""
+                if value:
+                    normalized = value.strip().upper()
+                    entry.private_residence = normalized in {"Y", "YES", "TRUE", "1", "X"}
+                    if normalized in {"N", "NO"}:
+                        entry.private_residence = False
+                context = None
+
+            elif line.startswith("Number of Attendees"):
+                match = re.search(r"\d+", line.replace(",", ""))
+                if match:
+                    try:
+                        entry.number_of_attendees = int(match.group(0))
+                    except ValueError:
+                        pass
+                context = None
+
+            elif line.startswith("Incidental Event"):
+                match = re.search(r"([\d,]+\.\d{2})", line)
+                if match:
+                    entry.incidental_event_amount = _parse_decimal(match.group(1))
+                context = None
+
+            elif line.startswith("Total Contributions"):
+                match = re.search(r"([\d,]+\.\d{2})", line)
+                if match:
+                    entry.total_contributions = _parse_decimal(match.group(1))
+                context = None
+
+            elif line.startswith("Location"):
+                value = ""
+                if ":" in line:
+                    value = line.split(":", 1)[1].strip()
+                else:
+                    value = line[len("Location") :].strip()
+                if not value and idx + 1 < len(lines):
+                    candidate = lines[idx + 1]
+                    if (
+                        ":" not in candidate
+                        and not _looks_like_address(candidate)
+                        and not candidate.startswith("Fundraiser ID:")
+                    ):
+                        value = candidate.strip()
+                        skip_next = max(skip_next, 1)
+                entry.location_name = value or entry.location_name
+                context = None
+
+            elif line.startswith("Co-Sponsor"):
+                value = line.split(":", 1)[1].strip() if ":" in line else ""
+                if not value and idx + 1 < len(lines):
+                    candidate = lines[idx + 1]
+                    if ":" not in candidate and not _looks_like_address(candidate):
+                        value = candidate.strip()
+                        skip_next = max(skip_next, 1)
+                entry.co_sponsor = value or None
+                context = None
+
+            elif line.startswith("Contribution Split %"):
+                value = line.split(":", 1)[1].strip() if ":" in line else ""
+                entry.contribution_split_percent = value or None
+                context = None
+
+            elif line.startswith("Expenditure Split %"):
+                value = line.split(":", 1)[1].strip() if ":" in line else ""
+                entry.expenditure_split_percent = value or None
+                context = None
+
+            else:
+                if context == "location_address":
+                    if line.startswith("Private Residence"):
+                        context = None
+                        entry.private_residence = True
+                        continue
+                    entry.location_address.append(line)
+                    continue
+                entry.extra.setdefault("unparsed", []).append(line)
+
+        if not entry.fundraiser_id:
+            entry.extra.setdefault("unparsed", []).append("Missing fundraiser id")
+
+        return entry
+
     def _parse_other_receipt_entry(self, entry_text: str, page_number: int) -> OtherReceiptEntry:
         lines = [_clean_line(line) for line in entry_text.splitlines() if _clean_line(line)]
         entry = OtherReceiptEntry(receipt_id="", page_number=page_number, raw_text=entry_text)
@@ -1181,6 +1396,7 @@ def main(args: Optional[Sequence[str]] = None) -> None:
     contributions = report_parser.parse_contributions()
     other_receipts = report_parser.parse_other_receipts()
     in_kind_contributions = report_parser.parse_in_kind_contributions()
+    fundraisers = report_parser.parse_fundraisers()
     expenditures = report_parser.parse_expenditures()
 
     parsed_args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -1189,12 +1405,14 @@ def main(args: Optional[Sequence[str]] = None) -> None:
         _write_json(contributions, parsed_args.output_dir / "contributions.json", parsed_args.include_raw)
         _write_json(other_receipts, parsed_args.output_dir / "other_receipts.json", parsed_args.include_raw)
         _write_json(in_kind_contributions, parsed_args.output_dir / "in_kind_contributions.json", parsed_args.include_raw)
+        _write_json(fundraisers, parsed_args.output_dir / "fundraisers.json", parsed_args.include_raw)
         _write_json(expenditures, parsed_args.output_dir / "expenditures.json", parsed_args.include_raw)
 
     if "csv" in parsed_args.formats:
         contrib_csv = parsed_args.output_dir / "contributions.csv"
         other_receipts_csv = parsed_args.output_dir / "other_receipts.csv"
         inkind_csv = parsed_args.output_dir / "in_kind_contributions.csv"
+        fundraisers_csv = parsed_args.output_dir / "fundraisers.csv"
         exp_csv = parsed_args.output_dir / "expenditures.csv"
         _write_csv(
             [
@@ -1258,6 +1476,27 @@ def main(args: Optional[Sequence[str]] = None) -> None:
         )
         _write_csv(
             [
+                "fundraiser_id",
+                "event_type",
+                "date_of_event",
+                "gross_receipts",
+                "location_name",
+                "location_address",
+                "private_residence",
+                "number_of_attendees",
+                "incidental_event_amount",
+                "total_contributions",
+                "co_sponsor",
+                "contribution_split_percent",
+                "expenditure_split_percent",
+                "page_number",
+                "extra",
+            ],
+            (entry.to_csv_row() for entry in fundraisers),
+            fundraisers_csv,
+        )
+        _write_csv(
+            [
                 "expense_id",
                 "category",
                 "date",
@@ -1277,10 +1516,11 @@ def main(args: Optional[Sequence[str]] = None) -> None:
         )
 
     logging.info(
-        "Parsed %d direct contribution entries, %d other receipt entries, %d in-kind contribution entries, and %d expenditure entries.",
+        "Parsed %d direct contribution entries, %d other receipt entries, %d in-kind contribution entries, %d fundraiser entries, and %d expenditure entries.",
         len(contributions),
         len(other_receipts),
         len(in_kind_contributions),
+        len(fundraisers),
         len(expenditures),
     )
 

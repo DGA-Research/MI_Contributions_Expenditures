@@ -74,6 +74,10 @@ def _split_contributor_name(name: Optional[str]) -> Tuple[Optional[str], Optiona
     return last, first
 
 
+def _looks_like_event_token(line: str) -> bool:
+    return bool(re.match(r"\d{2}-\d+\s*-\s*", line.strip()))
+
+
 def _looks_like_address(line: str) -> bool:
     """Best-effort signal that a line represents part of a postal address."""
     if not line or ":" in line:
@@ -607,6 +611,11 @@ class ReportParser:
 
         combined, positions, page_numbers = _combine_pages(pages)
         matches = list(_EXPENDITURE_ENTRY_PATTERN.finditer(combined))
+        if matches:
+            schedule_total_index = combined.find("Schedule Total", matches[-1].start())
+            if schedule_total_index != -1:
+                combined = combined[:schedule_total_index]
+                matches = list(_EXPENDITURE_ENTRY_PATTERN.finditer(combined))
         expenditures: List[ExpenditureEntry] = []
 
         for idx, match in enumerate(matches):
@@ -940,7 +949,7 @@ class ReportParser:
                 consumed = False
                 if not value and idx + 1 < len(lines):
                     candidate = lines[idx + 1]
-                    if ":" not in candidate and not _looks_like_address(candidate):
+                    if ":" not in candidate and (not _looks_like_address(candidate) or _looks_like_event_token(candidate)):
                         value = candidate.strip()
                         skip_next = max(skip_next, 1)
                         consumed = True
@@ -1005,11 +1014,21 @@ class ReportParser:
                 elif context == "description":
                     addition = line.strip()
                     if addition:
-                        entry.description = (
-                            f"{entry.description} {addition}".strip()
-                            if entry.description
-                            else addition
-                        )
+                        if _looks_like_address(addition):
+                            entry.employer_address.append(addition)
+                            context = "employer_address"
+                        elif _looks_like_event_token(addition):
+                            entry.fundraising_event_name = (
+                                f"{entry.fundraising_event_name} {addition}".strip()
+                                if entry.fundraising_event_name
+                                else addition
+                            )
+                        else:
+                            entry.description = (
+                                f"{entry.description} {addition}".strip()
+                                if entry.description
+                                else addition
+                            )
                 elif context == "fundraising_event":
                     if _looks_like_address(line):
                         entry.fundraising_event_address.append(line)

@@ -64,6 +64,16 @@ def _normalize_source_type(value: Optional[str]) -> Optional[str]:
         return mapped
     return stripped
 
+
+def _split_contributor_name(name: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+    if not name or "," not in name:
+        return None, None
+    last, first = name.split(",", 1)
+    last = last.strip() or None
+    first = first.strip() or None
+    return last, first
+
+
 def _looks_like_address(line: str) -> bool:
     """Best-effort signal that a line represents part of a postal address."""
     if not line or ":" in line:
@@ -126,6 +136,8 @@ class ContributionEntry:
     amount: Optional[Decimal] = None
     cumulative_amount: Optional[Decimal] = None
     contributor_name: Optional[str] = None
+    contributor_last_name: Optional[str] = None
+    contributor_first_name: Optional[str] = None
     occupation: Optional[str] = None
     employer: Optional[str] = None
     address_lines: List[str] = field(default_factory=list)
@@ -144,6 +156,8 @@ class ContributionEntry:
             "amount": _decimal_to_string(self.amount),
             "cumulative_amount": _decimal_to_string(self.cumulative_amount),
             "contributor_name": self.contributor_name,
+            "contributor_last_name": self.contributor_last_name,
+            "contributor_first_name": self.contributor_first_name,
             "occupation": self.occupation,
             "employer": self.employer,
             "address_lines": self.address_lines,
@@ -166,6 +180,8 @@ class ContributionEntry:
             "amount": _decimal_to_string(self.amount) or "",
             "cumulative_amount": _decimal_to_string(self.cumulative_amount) or "",
             "contributor_name": self.contributor_name or "",
+            "contributor_last_name": self.contributor_last_name or "",
+            "contributor_first_name": self.contributor_first_name or "",
             "occupation": self.occupation or "",
             "employer": self.employer or "",
             "address": " | ".join(self.address_lines),
@@ -185,6 +201,8 @@ class InKindContributionEntry:
     amount: Optional[Decimal] = None
     cumulative_amount: Optional[Decimal] = None
     contributor_name: Optional[str] = None
+    contributor_last_name: Optional[str] = None
+    contributor_first_name: Optional[str] = None
     occupation: Optional[str] = None
     employer: Optional[str] = None
     address_lines: List[str] = field(default_factory=list)
@@ -206,6 +224,8 @@ class InKindContributionEntry:
             "amount": _decimal_to_string(self.amount),
             "cumulative_amount": _decimal_to_string(self.cumulative_amount),
             "contributor_name": self.contributor_name,
+            "contributor_last_name": self.contributor_last_name,
+            "contributor_first_name": self.contributor_first_name,
             "occupation": self.occupation,
             "employer": self.employer,
             "address_lines": self.address_lines,
@@ -231,6 +251,8 @@ class InKindContributionEntry:
             "amount": _decimal_to_string(self.amount) or "",
             "cumulative_amount": _decimal_to_string(self.cumulative_amount) or "",
             "contributor_name": self.contributor_name or "",
+            "contributor_last_name": self.contributor_last_name or "",
+            "contributor_first_name": self.contributor_first_name or "",
             "occupation": self.occupation or "",
             "employer": self.employer or "",
             "address": " | ".join(self.address_lines),
@@ -793,6 +815,9 @@ class ReportParser:
                 contribution.extra = {}
 
         contribution.source_type = _normalize_source_type(contribution.source_type)
+        last, first = _split_contributor_name(contribution.contributor_name)
+        contribution.contributor_last_name = last
+        contribution.contributor_first_name = first
 
         return contribution
 
@@ -1016,6 +1041,9 @@ class ReportParser:
                 entry.extra = {}
 
         entry.source_type = _normalize_source_type(entry.source_type)
+        last, first = _split_contributor_name(entry.contributor_name)
+        entry.contributor_last_name = last
+        entry.contributor_first_name = first
 
         return entry
 
@@ -1426,6 +1454,8 @@ def main(args: Optional[Sequence[str]] = None) -> None:
                 "amount",
                 "cumulative_amount",
                 "contributor_name",
+                "contributor_last_name",
+                "contributor_first_name",
                 "occupation",
                 "employer",
                 "address",
@@ -1463,6 +1493,8 @@ def main(args: Optional[Sequence[str]] = None) -> None:
                 "amount",
                 "cumulative_amount",
                 "contributor_name",
+                "contributor_last_name",
+                "contributor_first_name",
                 "occupation",
                 "employer",
                 "address",

@@ -74,6 +74,26 @@ def _split_contributor_name(name: Optional[str]) -> Tuple[Optional[str], Optiona
     return last, first
 
 
+def _extract_state_zip(address_lines: Sequence[str]) -> Tuple[Optional[str], Optional[str]]:
+    zip_code: Optional[str] = None
+    state_name: Optional[str] = None
+
+    for line in reversed(address_lines):
+        zip_match = re.search(r"\b\d{5}(?:-\d{4})?\b", line)
+        if zip_match and not zip_code:
+            zip_code = zip_match.group(0)
+
+        if "," in line and not state_name:
+            parts = [part.strip() for part in line.split(",", 1)]
+            if len(parts) == 2 and parts[1]:
+                state_name = parts[1]
+
+        if zip_code and state_name:
+            break
+
+    return state_name or None, zip_code or None
+
+
 def _looks_like_event_token(line: str) -> bool:
     return bool(re.match(r"\d{2}-\d+\s*-\s*", line.strip()))
 
@@ -142,6 +162,8 @@ class ContributionEntry:
     contributor_name: Optional[str] = None
     contributor_last_name: Optional[str] = None
     contributor_first_name: Optional[str] = None
+    contributor_state: Optional[str] = None
+    contributor_zip: Optional[str] = None
     occupation: Optional[str] = None
     employer: Optional[str] = None
     address_lines: List[str] = field(default_factory=list)
@@ -162,6 +184,8 @@ class ContributionEntry:
             "contributor_name": self.contributor_name,
             "contributor_last_name": self.contributor_last_name,
             "contributor_first_name": self.contributor_first_name,
+            "contributor_state": self.contributor_state,
+            "contributor_zip": self.contributor_zip,
             "occupation": self.occupation,
             "employer": self.employer,
             "address_lines": self.address_lines,
@@ -186,6 +210,8 @@ class ContributionEntry:
             "contributor_name": self.contributor_name or "",
             "contributor_last_name": self.contributor_last_name or "",
             "contributor_first_name": self.contributor_first_name or "",
+            "contributor_state": self.contributor_state or "",
+            "contributor_zip": self.contributor_zip or "",
             "occupation": self.occupation or "",
             "employer": self.employer or "",
             "address": " | ".join(self.address_lines),
@@ -827,6 +853,9 @@ class ReportParser:
         last, first = _split_contributor_name(contribution.contributor_name)
         contribution.contributor_last_name = last
         contribution.contributor_first_name = first
+        state, postal_code = _extract_state_zip(contribution.address_lines)
+        contribution.contributor_state = state
+        contribution.contributor_zip = postal_code
 
         return contribution
 
@@ -1506,6 +1535,8 @@ def main(args: Optional[Sequence[str]] = None) -> None:
                 "contributor_name",
                 "contributor_last_name",
                 "contributor_first_name",
+                "contributor_state",
+                "contributor_zip",
                 "occupation",
                 "employer",
                 "address",

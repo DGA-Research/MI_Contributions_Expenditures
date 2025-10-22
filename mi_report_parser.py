@@ -1160,6 +1160,24 @@ class ReportParser:
                     continue
                 entry.extra.setdefault("unparsed", []).append(line)
 
+        unparsed = entry.extra.get("unparsed")
+        if unparsed:
+            remaining = []
+            for token in unparsed:
+                normalized = token.strip().upper()
+                if normalized == "X" and entry.private_residence is None:
+                    entry.private_residence = True
+                elif entry.location_name and not _looks_like_address(token):
+                    entry.location_name = f"{entry.location_name} {token}".strip()
+                else:
+                    remaining.append(token)
+            if remaining:
+                entry.extra["unparsed"] = remaining
+            else:
+                del entry.extra["unparsed"]
+            if not entry.extra:
+                entry.extra = {}
+
         if not entry.fundraiser_id:
             entry.extra.setdefault("unparsed", []).append("Missing fundraiser id")
 

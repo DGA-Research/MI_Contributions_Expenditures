@@ -1286,7 +1286,18 @@ class ReportParser:
 
             if line.startswith("Expense ID:"):
                 after_colon = line.split(":", 1)[1].strip()
-                expenditure.expense_id = after_colon.split()[0] if after_colon else ""
+                if idx + 1 < len(lines):
+                    candidate = lines[idx + 1]
+                    if re.fullmatch(r"[0-9-]+", candidate):
+                        if after_colon.endswith("-"):
+                            after_colon = f"{after_colon}{candidate}"
+                        else:
+                            after_colon = f"{after_colon} {candidate}"
+                        skip_next = True
+                cleaned_id = after_colon.strip()
+                if cleaned_id.upper().endswith(" EXPENSE"):
+                    cleaned_id = cleaned_id[: -len(" Expense")].rstrip()
+                expenditure.expense_id = cleaned_id
                 context = None
 
             elif line.startswith("Category:"):
@@ -1346,6 +1357,8 @@ class ReportParser:
                 context = None
 
             else:
+                if line.upper() == "EXPENSE":
+                    continue
                 if context == "post_name":
                     if not expenditure.name:
                         expenditure.name = line

@@ -267,17 +267,26 @@ if uploaded_pdf is not None:
                     }
                     workbook_bytes = summary.workbook_path.read_bytes()
 
-                    csv_archive = io.BytesIO()
-                    with zipfile.ZipFile(csv_archive, "w", zipfile.ZIP_DEFLATED) as archive:
-                        for csv_file in csv_files:
-                            archive.write(csv_file, arcname=csv_file.name)
-                    csv_archive_bytes = csv_archive.getvalue()
+                    if csv_files:
+                        csv_archive = io.BytesIO()
+                        with zipfile.ZipFile(csv_archive, "w", zipfile.ZIP_DEFLATED) as archive:
+                            for csv_file in csv_files:
+                                archive.write(csv_file, arcname=csv_file.name)
+                        csv_archive_bytes = csv_archive.getvalue()
+                    else:
+                        csv_archive_bytes = None
                     pages_processed = summary.pages_processed
 
-            st.success(
-                f"Processed {pages_processed} pages and generated "
-                f"{len(csv_files)} schedule CSV files."
-            )
+            if csv_files:
+                st.success(
+                    f"Processed {pages_processed} pages and generated "
+                    f"{len(csv_files)} schedule CSV files."
+                )
+            else:
+                st.success(f"Processed {pages_processed} pages.")
+                st.info(
+                    "No schedule CSV files were detected. The generated workbook contains a status note."
+                )
 
             if csv_files:
                 selected_csv = st.selectbox(
@@ -298,14 +307,15 @@ if uploaded_pdf is not None:
                 file_name=f"{report_stem}_finance_workbook.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
-            csv_archive_stream = io.BytesIO(csv_archive_bytes)
-            csv_archive_stream.seek(0)
-            st.download_button(
-                "Download CSV Bundle",
-                data=csv_archive_stream,
-                file_name=f"{report_stem}_finance_csv.zip",
-                mime="application/zip",
-            )
+            if csv_archive_bytes:
+                csv_archive_stream = io.BytesIO(csv_archive_bytes)
+                csv_archive_stream.seek(0)
+                st.download_button(
+                    "Download CSV Bundle",
+                    data=csv_archive_stream,
+                    file_name=f"{report_stem}_finance_csv.zip",
+                    mime="application/zip",
+                )
 
     except Exception as exc:  # pragma: no cover - surface unexpected errors
         st.error(f"Failed to process PDF: {exc}")

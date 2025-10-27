@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import io
 import tempfile
-import zipfile
 from pathlib import Path
 
 import pandas as pd
@@ -262,42 +261,16 @@ if uploaded_pdf is not None:
                     )
 
                     csv_files = sorted(summary.csv_dir.glob("*.csv"))
-                    csv_previews = {
-                        path.name: pd.read_csv(path, nrows=25) for path in csv_files
-                    }
                     workbook_bytes = summary.workbook_path.read_bytes()
 
-                    if csv_files:
-                        csv_archive = io.BytesIO()
-                        with zipfile.ZipFile(csv_archive, "w", zipfile.ZIP_DEFLATED) as archive:
-                            for csv_file in csv_files:
-                                archive.write(csv_file, arcname=csv_file.name)
-                        csv_archive_bytes = csv_archive.getvalue()
-                    else:
-                        csv_archive_bytes = None
                     pages_processed = summary.pages_processed
 
-            if csv_files:
-                st.success(
-                    f"Processed {pages_processed} pages and generated "
-                    f"{len(csv_files)} schedule CSV files."
-                )
-            else:
-                st.success(f"Processed {pages_processed} pages.")
+            st.success(f"Processed {pages_processed} pages.")
+            if not csv_files:
                 st.info(
-                    "No schedule CSV files were detected. The generated workbook contains a status note."
+                    "No schedule CSV files were produced; the downloaded workbook contains a status note "
+                    "in place of detailed schedules."
                 )
-
-            if csv_files:
-                selected_csv = st.selectbox(
-                    "Preview CSV output",
-                    options=list(csv_previews.keys()),
-                )
-                preview_df = csv_previews[selected_csv]
-                st.dataframe(preview_df, use_container_width=True)
-                st.caption("Preview limited to the first 25 rows.")
-            else:
-                st.info("No CSV files were generated for this document.")
 
             workbook_stream = io.BytesIO(workbook_bytes)
             workbook_stream.seek(0)
@@ -307,15 +280,6 @@ if uploaded_pdf is not None:
                 file_name=f"{report_stem}_finance_workbook.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
-            if csv_archive_bytes:
-                csv_archive_stream = io.BytesIO(csv_archive_bytes)
-                csv_archive_stream.seek(0)
-                st.download_button(
-                    "Download CSV Bundle",
-                    data=csv_archive_stream,
-                    file_name=f"{report_stem}_finance_csv.zip",
-                    mime="application/zip",
-                )
 
     except Exception as exc:  # pragma: no cover - surface unexpected errors
         st.error(f"Failed to process PDF: {exc}")

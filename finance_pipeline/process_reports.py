@@ -109,11 +109,21 @@ def process_pdf(
     if compile_result != 0:
         raise RuntimeError(f"compile_pdf_to_csv failed for {pdf_path}")
 
-    workbook_result = workbook_main(
-        ["--input", str(csv_dir), "--output", str(workbook_path)]
-    )
-    if workbook_result != 0:
-        raise RuntimeError(f"csv_to_workbook failed for {pdf_path}")
+    csv_files = sorted(csv_dir.glob("*.csv"))
+    if csv_files:
+        workbook_result = workbook_main(
+            ["--input", str(csv_dir), "--output", str(workbook_path)]
+        )
+        if workbook_result != 0:
+            raise RuntimeError(f"csv_to_workbook failed for {pdf_path}")
+    else:
+        from openpyxl import Workbook  # type: ignore
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Info"
+        ws.append(["No CSV files were generated for this report."])
+        wb.save(workbook_path)
 
     return ReportSummary(
         filename=pdf_path.name,

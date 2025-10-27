@@ -64,6 +64,40 @@ def _normalize_source_type(value: Optional[str]) -> Optional[str]:
         return mapped
     return stripped
 
+
+def _split_contributor_name(name: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+    if not name or "," not in name:
+        return None, None
+    last, first = name.split(",", 1)
+    last = last.strip() or None
+    first = first.strip() or None
+    return last, first
+
+
+def _extract_state_zip(address_lines: Sequence[str]) -> Tuple[Optional[str], Optional[str]]:
+    zip_code: Optional[str] = None
+    state_name: Optional[str] = None
+
+    for line in reversed(address_lines):
+        zip_match = re.search(r"\b\d{5}(?:-\d{4})?\b", line)
+        if zip_match and not zip_code:
+            zip_code = zip_match.group(0)
+
+        if "," in line and not state_name:
+            parts = [part.strip() for part in line.split(",", 1)]
+            if len(parts) == 2 and parts[1]:
+                state_name = parts[1]
+
+        if zip_code and state_name:
+            break
+
+    return state_name or None, zip_code or None
+
+
+def _looks_like_event_token(line: str) -> bool:
+    return bool(re.match(r"\d{2}-\d+\s*-\s*", line.strip()))
+
+
 def _looks_like_address(line: str) -> bool:
     """Best-effort signal that a line represents part of a postal address."""
     if not line or ":" in line:
@@ -126,6 +160,10 @@ class ContributionEntry:
     amount: Optional[Decimal] = None
     cumulative_amount: Optional[Decimal] = None
     contributor_name: Optional[str] = None
+    contributor_last_name: Optional[str] = None
+    contributor_first_name: Optional[str] = None
+    contributor_state: Optional[str] = None
+    contributor_zip: Optional[str] = None
     occupation: Optional[str] = None
     employer: Optional[str] = None
     address_lines: List[str] = field(default_factory=list)
@@ -144,6 +182,10 @@ class ContributionEntry:
             "amount": _decimal_to_string(self.amount),
             "cumulative_amount": _decimal_to_string(self.cumulative_amount),
             "contributor_name": self.contributor_name,
+            "contributor_last_name": self.contributor_last_name,
+            "contributor_first_name": self.contributor_first_name,
+            "contributor_state": self.contributor_state,
+            "contributor_zip": self.contributor_zip,
             "occupation": self.occupation,
             "employer": self.employer,
             "address_lines": self.address_lines,
@@ -166,6 +208,10 @@ class ContributionEntry:
             "amount": _decimal_to_string(self.amount) or "",
             "cumulative_amount": _decimal_to_string(self.cumulative_amount) or "",
             "contributor_name": self.contributor_name or "",
+            "contributor_last_name": self.contributor_last_name or "",
+            "contributor_first_name": self.contributor_first_name or "",
+            "contributor_state": self.contributor_state or "",
+            "contributor_zip": self.contributor_zip or "",
             "occupation": self.occupation or "",
             "employer": self.employer or "",
             "address": " | ".join(self.address_lines),
@@ -185,6 +231,8 @@ class InKindContributionEntry:
     amount: Optional[Decimal] = None
     cumulative_amount: Optional[Decimal] = None
     contributor_name: Optional[str] = None
+    contributor_last_name: Optional[str] = None
+    contributor_first_name: Optional[str] = None
     occupation: Optional[str] = None
     employer: Optional[str] = None
     address_lines: List[str] = field(default_factory=list)
@@ -206,6 +254,8 @@ class InKindContributionEntry:
             "amount": _decimal_to_string(self.amount),
             "cumulative_amount": _decimal_to_string(self.cumulative_amount),
             "contributor_name": self.contributor_name,
+            "contributor_last_name": self.contributor_last_name,
+            "contributor_first_name": self.contributor_first_name,
             "occupation": self.occupation,
             "employer": self.employer,
             "address_lines": self.address_lines,
@@ -231,6 +281,8 @@ class InKindContributionEntry:
             "amount": _decimal_to_string(self.amount) or "",
             "cumulative_amount": _decimal_to_string(self.cumulative_amount) or "",
             "contributor_name": self.contributor_name or "",
+            "contributor_last_name": self.contributor_last_name or "",
+            "contributor_first_name": self.contributor_first_name or "",
             "occupation": self.occupation or "",
             "employer": self.employer or "",
             "address": " | ".join(self.address_lines),
@@ -585,6 +637,11 @@ class ReportParser:
 
         combined, positions, page_numbers = _combine_pages(pages)
         matches = list(_EXPENDITURE_ENTRY_PATTERN.finditer(combined))
+        if matches:
+            schedule_total_index = combined.find("Schedule Total", matches[-1].start())
+            if schedule_total_index != -1:
+                combined = combined[:schedule_total_index]
+                matches = list(_EXPENDITURE_ENTRY_PATTERN.finditer(combined))
         expenditures: List[ExpenditureEntry] = []
 
         for idx, match in enumerate(matches):
@@ -712,9 +769,12 @@ class ReportParser:
 
             elif line.startswith("Fundraising Event"):
                 value = line.split(":", 1)[1].strip() if ":" in line else line[len("Fundraising Event") :].strip()
-                if not value and idx + 1 < len(lines) and ":" not in lines[idx + 1]:
-                    value = lines[idx + 1].strip()
-                    skip_next = max(skip_next, 1)
+                if not value and idx + 1 < len(lines):
+                    candidate = lines[idx + 1]
+                    if ":" not in candidate and not _looks_like_address(candidate):
+                        value = candidate.strip()
+                        skip_next = max(skip_next, 1)
+                        consumed = True
                 contribution.fundraising_event = value or None
                 context = None
 
@@ -790,6 +850,12 @@ class ReportParser:
                 contribution.extra = {}
 
         contribution.source_type = _normalize_source_type(contribution.source_type)
+        last, first = _split_contributor_name(contribution.contributor_name)
+        contribution.contributor_last_name = last
+        contribution.contributor_first_name = first
+        state, postal_code = _extract_state_zip(contribution.address_lines)
+        contribution.contributor_state = state
+        contribution.contributor_zip = postal_code
 
         return contribution
 
@@ -912,7 +978,7 @@ class ReportParser:
                 consumed = False
                 if not value and idx + 1 < len(lines):
                     candidate = lines[idx + 1]
-                    if ":" not in candidate and not _looks_like_address(candidate):
+                    if ":" not in candidate and (not _looks_like_address(candidate) or _looks_like_event_token(candidate)):
                         value = candidate.strip()
                         skip_next = max(skip_next, 1)
                         consumed = True
@@ -977,11 +1043,21 @@ class ReportParser:
                 elif context == "description":
                     addition = line.strip()
                     if addition:
-                        entry.description = (
-                            f"{entry.description} {addition}".strip()
-                            if entry.description
-                            else addition
-                        )
+                        if _looks_like_address(addition):
+                            entry.employer_address.append(addition)
+                            context = "employer_address"
+                        elif _looks_like_event_token(addition):
+                            entry.fundraising_event_name = (
+                                f"{entry.fundraising_event_name} {addition}".strip()
+                                if entry.fundraising_event_name
+                                else addition
+                            )
+                        else:
+                            entry.description = (
+                                f"{entry.description} {addition}".strip()
+                                if entry.description
+                                else addition
+                            )
                 elif context == "fundraising_event":
                     if _looks_like_address(line):
                         entry.fundraising_event_address.append(line)
@@ -1013,6 +1089,9 @@ class ReportParser:
                 entry.extra = {}
 
         entry.source_type = _normalize_source_type(entry.source_type)
+        last, first = _split_contributor_name(entry.contributor_name)
+        entry.contributor_last_name = last
+        entry.contributor_first_name = first
 
         return entry
 
@@ -1129,6 +1208,24 @@ class ReportParser:
                     continue
                 entry.extra.setdefault("unparsed", []).append(line)
 
+        unparsed = entry.extra.get("unparsed")
+        if unparsed:
+            remaining = []
+            for token in unparsed:
+                normalized = token.strip().upper()
+                if normalized == "X" and entry.private_residence is None:
+                    entry.private_residence = True
+                elif entry.location_name and not _looks_like_address(token):
+                    entry.location_name = f"{entry.location_name} {token}".strip()
+                else:
+                    remaining.append(token)
+            if remaining:
+                entry.extra["unparsed"] = remaining
+            else:
+                del entry.extra["unparsed"]
+            if not entry.extra:
+                entry.extra = {}
+
         if not entry.fundraiser_id:
             entry.extra.setdefault("unparsed", []).append("Missing fundraiser id")
 
@@ -1237,7 +1334,18 @@ class ReportParser:
 
             if line.startswith("Expense ID:"):
                 after_colon = line.split(":", 1)[1].strip()
-                expenditure.expense_id = after_colon.split()[0] if after_colon else ""
+                if idx + 1 < len(lines):
+                    candidate = lines[idx + 1]
+                    if re.fullmatch(r"[0-9-]+", candidate):
+                        if after_colon.endswith("-"):
+                            after_colon = f"{after_colon}{candidate}"
+                        else:
+                            after_colon = f"{after_colon} {candidate}"
+                        skip_next = True
+                cleaned_id = after_colon.strip()
+                if cleaned_id.upper().endswith(" EXPENSE"):
+                    cleaned_id = cleaned_id[: -len(" Expense")].rstrip()
+                expenditure.expense_id = cleaned_id
                 context = None
 
             elif line.startswith("Category:"):
@@ -1297,6 +1405,8 @@ class ReportParser:
                 context = None
 
             else:
+                if line.upper() == "EXPENSE":
+                    continue
                 if context == "post_name":
                     if not expenditure.name:
                         expenditure.name = line
@@ -1423,6 +1533,10 @@ def main(args: Optional[Sequence[str]] = None) -> None:
                 "amount",
                 "cumulative_amount",
                 "contributor_name",
+                "contributor_last_name",
+                "contributor_first_name",
+                "contributor_state",
+                "contributor_zip",
                 "occupation",
                 "employer",
                 "address",
@@ -1460,6 +1574,8 @@ def main(args: Optional[Sequence[str]] = None) -> None:
                 "amount",
                 "cumulative_amount",
                 "contributor_name",
+                "contributor_last_name",
+                "contributor_first_name",
                 "occupation",
                 "employer",
                 "address",

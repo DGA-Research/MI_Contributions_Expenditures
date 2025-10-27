@@ -18,7 +18,8 @@ import streamlit as st
 from az_report_parser import AZReportParser
 from finance_pipeline.process_reports import process_pdf
 from mi_report_parser import ReportParser
-from alaska_project import process_single_pdf
+from disclosure_parser import process_single_pdf as process_disclosure_pdf
+from alaska_project import process_single_pdf as process_alaska_pofd
 
 
 st.set_page_config(page_title="Campaign Finance Parser", layout="wide")
@@ -43,6 +44,7 @@ parser_selection = st.radio(
         "Michigan Campaign Report Summary and Schedules",
         "Arizona Campaign Finance Report",
         "Alaska POFD Schedules",
+        "Federal Financial Disclosure Report",
         "Pennsylvania Campaign Finance Report",
     ),
 )
@@ -253,7 +255,7 @@ if uploaded_pdf is not None:
                     tmp_pdf_path.write_bytes(tmp_path.read_bytes())
                     output_workbook = Path(pipeline_dir) / "pofd_schedules.xlsx"
 
-                    workbook_path = process_single_pdf(tmp_pdf_path, output_workbook)
+                    workbook_path = process_alaska_pofd(tmp_pdf_path, output_workbook)
                     workbook_bytes = workbook_path.read_bytes()
 
             st.success("Parsed Alaska POFD schedules.")
@@ -264,6 +266,26 @@ if uploaded_pdf is not None:
                 "Download POFD Workbook",
                 data=workbook_stream,
                 file_name=f"{report_stem}_pofd_schedules.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        elif parser_selection == "Federal Financial Disclosure Report":
+            with st.spinner("Parsing federal financial disclosure..."):
+                with tempfile.TemporaryDirectory() as pipeline_dir:
+                    tmp_pdf_path = Path(pipeline_dir) / "disclosure.pdf"
+                    tmp_pdf_path.write_bytes(tmp_path.read_bytes())
+                    output_workbook = Path(pipeline_dir) / "financial_disclosure.xlsx"
+
+                    workbook_path = process_disclosure_pdf(tmp_pdf_path, output_workbook)
+                    workbook_bytes = workbook_path.read_bytes()
+
+            st.success("Parsed federal financial disclosure schedules.")
+
+            workbook_stream = io.BytesIO(workbook_bytes)
+            workbook_stream.seek(0)
+            st.download_button(
+                "Download Financial Disclosure Workbook",
+                data=workbook_stream,
+                file_name=f"{report_stem}_financial_disclosure.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
         else:

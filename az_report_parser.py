@@ -22,7 +22,7 @@ from typing import Iterable, List, Optional, Sequence
 from pypdf import PdfReader
 
 _DATE_AMOUNT_RE = re.compile(r"(?P<date>\d{2}/\d{2}/\d{4}).*?\$(?P<amount>[\(\)\d,\.]+)")
-_STATE_ZIP_RE = re.compile(r"\b([A-Z]{2})\s+(\d{5}(?:-\d{4})?)\b")
+_STATE_ZIP_RE = re.compile(r"\b([A-Z]{2})\s+(\d{3,5}(?:-\d{4})?)\b")
 
 
 def _clean_line(line: str) -> str:
@@ -224,6 +224,13 @@ class AZReportParser:
                 state_zip_match = _STATE_ZIP_RE.search(address_lines[-1])
                 if state_zip_match:
                     state, zip_code = state_zip_match.groups()
+                    if zip_code:
+                        if "-" in zip_code:
+                            prefix, suffix = zip_code.split("-", 1)
+                            if prefix.isdigit() and len(prefix) < 5:
+                                zip_code = f"{prefix.zfill(5)}-{suffix}"
+                        elif zip_code.isdigit() and len(zip_code) < 5:
+                            zip_code = zip_code.zfill(5)
 
             date_line = lines[date_index]
             date_match = _DATE_AMOUNT_RE.search(date_line)

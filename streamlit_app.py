@@ -18,6 +18,7 @@ import streamlit as st
 from az_report_parser import AZReportParser
 from finance_pipeline.process_reports import process_pdf
 from mi_report_parser import ReportParser
+from alaska_project import process_single_pdf
 
 
 st.set_page_config(page_title="Campaign Finance Parser", layout="wide")
@@ -41,6 +42,7 @@ parser_selection = st.radio(
     options=(
         "Michigan Campaign Report Summary and Schedules",
         "Arizona Campaign Finance Report",
+        "Alaska POFD Schedules",
         "Pennsylvania Campaign Finance Report",
     ),
 )
@@ -242,6 +244,26 @@ if uploaded_pdf is not None:
                 "Download Excel Workbook",
                 data=output_stream,
                 file_name="az_campaign_finance.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        elif parser_selection == "Alaska POFD Schedules":
+            with st.spinner("Extracting Alaska POFD schedules..."):
+                with tempfile.TemporaryDirectory() as pipeline_dir:
+                    tmp_pdf_path = Path(pipeline_dir) / "pofd.pdf"
+                    tmp_pdf_path.write_bytes(tmp_path.read_bytes())
+                    output_workbook = Path(pipeline_dir) / "pofd_schedules.xlsx"
+
+                    workbook_path = process_single_pdf(tmp_pdf_path, output_workbook)
+                    workbook_bytes = workbook_path.read_bytes()
+
+            st.success("Parsed Alaska POFD schedules.")
+
+            workbook_stream = io.BytesIO(workbook_bytes)
+            workbook_stream.seek(0)
+            st.download_button(
+                "Download POFD Workbook",
+                data=workbook_stream,
+                file_name=f"{report_stem}_pofd_schedules.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
         else:

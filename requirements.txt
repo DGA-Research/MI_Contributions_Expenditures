@@ -2,3 +2,5 @@ pypdf
 pandas
 streamlit
 xlsxwriter
+pdfplumber
+openpyxl

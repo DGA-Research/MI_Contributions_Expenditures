@@ -1,27 +1,32 @@
 #!/usr/bin/env python3
 """
-Streamlit UI that accepts a Michigan campaign finance PDF and returns a combined
-Excel workbook with contributions and expenditures on separate sheets.
+Streamlit UI for multiple campaign finance PDF workflows:
+  - Michigan Candidate Report View and Schedules (multi-schedule export)
+  - Arizona Schedule C2 individual contributions
+  - FinanceWork pipeline (text -> CSV schedules -> Excel workbook)
 """
 
 from __future__ import annotations
 
 import io
 import tempfile
+import zipfile
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
 from az_report_parser import AZReportParser
+from finance_pipeline.process_reports import process_pdf
 from mi_report_parser import ReportParser
 
 
 st.set_page_config(page_title="Campaign Finance Parser", layout="wide")
 st.title("Campaign Finance Parser")
 st.write(
-    "Upload a 'Candidate Report View and Schedules' PDF from Michigan or an Arizona "
-    "Schedule C2 PDF to extract contributions and, for Michigan filings, the related schedules."
+    "Upload a campaign finance PDF and choose the parsing workflow. "
+    "Michigan and Arizona paths mirror their respective schedules, while the Finance pipeline "
+    "runs the text -> CSV -> Excel process from the FinanceWork tooling."
 )
 
 
@@ -29,12 +34,12 @@ uploaded_pdf = st.file_uploader(
     "Select the PDF file",
     type=["pdf"],
     accept_multiple_files=False,
-    help="Supports Michigan Candidate Report PDFs and Arizona Schedule C2 filings.",
+    help="Supported workflows: Michigan Candidate Report PDFs, Arizona Schedule C2 filings, or FinanceWork text -> CSV -> Excel pipeline.",
 )
 
-state_selection = st.radio(
-    "Select filing state",
-    options=("Michigan", "Arizona"),
+parser_selection = st.radio(
+    "Select workflow",
+    options=("Michigan", "Arizona", "Finance Pipeline"),
 )
 
 
@@ -49,9 +54,13 @@ if uploaded_pdf is not None:
         tmp_pdf.write(uploaded_pdf.getbuffer())
         tmp_path = Path(tmp_pdf.name)
 
+    report_stem = (
+        Path(uploaded_pdf.name).stem if getattr(uploaded_pdf, "name", None) else "report"
+    )
+
     try:
-        if state_selection == "Michigan":
-            with st.spinner("Parsing Michigan PDF…"):
+        if parser_selection == "Michigan":
+            with st.spinner("Parsing Michigan PDF..."):
                 parser = ReportParser(tmp_path)
                 contributions = parser.parse_contributions()
                 other_receipts = parser.parse_other_receipts()
@@ -104,8 +113,8 @@ if uploaded_pdf is not None:
                 file_name="mi_campaign_finance.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
-        else:
-            with st.spinner("Parsing Arizona PDF…"):
+        elif parser_selection == "Arizona":
+            with st.spinner("Parsing Arizona PDF..."):
                 parser = AZReportParser(tmp_path)
                 az_contributions = parser.parse_contributions()
 
@@ -154,6 +163,70 @@ if uploaded_pdf is not None:
                 file_name="az_campaign_finance.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
+        else:
+            with st.spinner("Running Finance pipeline..."):
+                with tempfile.TemporaryDirectory() as pipeline_dir:
+                    base_path = Path(pipeline_dir)
+                    text_root = base_path / "text_output"
+                    csv_root = base_path / "csv_output"
+                    workbook_root = base_path / "workbooks"
+
+                    summary = process_pdf(
+                        tmp_path,
+                        text_root,
+                        csv_root,
+                        workbook_root,
+                        enable_ocr=False,
+                    )
+
+                    csv_files = sorted(summary.csv_dir.glob("*.csv"))
+                    csv_previews = {
+                        path.name: pd.read_csv(path, nrows=25) for path in csv_files
+                    }
+                    workbook_bytes = summary.workbook_path.read_bytes()
+
+                    csv_archive = io.BytesIO()
+                    with zipfile.ZipFile(csv_archive, "w", zipfile.ZIP_DEFLATED) as archive:
+                        for csv_file in csv_files:
+                            archive.write(csv_file, arcname=csv_file.name)
+                    csv_archive_bytes = csv_archive.getvalue()
+                    pages_processed = summary.pages_processed
+
+            st.success(
+                f"Processed {pages_processed} pages and generated "
+                f"{len(csv_files)} schedule CSV files."
+            )
+
+            if csv_files:
+                selected_csv = st.selectbox(
+                    "Preview CSV output",
+                    options=list(csv_previews.keys()),
+                )
+                preview_df = csv_previews[selected_csv]
+                st.dataframe(preview_df, use_container_width=True)
+                st.caption("Preview limited to the first 25 rows.")
+            else:
+                st.info("No CSV files were generated for this document.")
+
+            workbook_stream = io.BytesIO(workbook_bytes)
+            workbook_stream.seek(0)
+            st.download_button(
+                "Download Consolidated Workbook",
+                data=workbook_stream,
+                file_name=f"{report_stem}_finance_workbook.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+            csv_archive_stream = io.BytesIO(csv_archive_bytes)
+            csv_archive_stream.seek(0)
+            st.download_button(
+                "Download CSV Bundle",
+                data=csv_archive_stream,
+                file_name=f"{report_stem}_finance_csv.zip",
+                mime="application/zip",
+            )
+
+    except Exception as exc:  # pragma: no cover - surface unexpected errors
+        st.error(f"Failed to process PDF: {exc}")
 
     finally:
         try:

@@ -12,7 +12,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Optional
+import sys
 
 try:
     import pdfplumber
@@ -70,6 +70,7 @@ def extract_pdf(
             text = page.extract_text() or ""
 
             if not text.strip() and enable_ocr:
+                # For image-based pages, run OCR if enabled.
                 page_image = page.to_image(resolution=300)
                 ocr_text = pytesseract.image_to_string(page_image.original)
                 if ocr_text.strip():
@@ -114,9 +115,9 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Optional[Iterable[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(list(argv) if argv is not None else None)
+    args = parser.parse_args(argv)
 
     if not args.pdf.exists():
         parser.error(f"PDF not found: {args.pdf}")

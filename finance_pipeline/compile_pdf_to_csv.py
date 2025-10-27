@@ -198,12 +198,11 @@ class ContributionEntry:
     state: str = ""
     zip_code: str = ""
     contributor_type: str = ""
-    occupation: str = ""
     employer_name: str = ""
+    occupation: str = ""
     employer_city: str = ""
     employer_state: str = ""
     employer_zip: str = ""
-    employer_description: str = ""
     description: str = ""
 
 
@@ -223,9 +222,12 @@ class ExpenditureEntry:
 
 
 class DocumentParser:
-    def __init__(self, lines: List[str]):
+    def __init__(self, lines: List[str]) -> None:
         self.lines = lines
-        self.index = 0
+        self.idx = 0
+        self.page = 0
+        self.schedule = ""
+        self.part = ""
         self.results: Dict[str, List] = {
             "schedule_i_part_a": [],
             "schedule_i_part_b": [],
@@ -235,465 +237,502 @@ class DocumentParser:
             "schedule_ii_part_g": [],
             "schedule_iii": [],
         }
-        self.current_page = 0
 
     def parse(self) -> None:
-        while self.index < len(self.lines):
-            line = clean(self.lines[self.index])
+        while self.idx < len(self.lines):
+            raw_line = self.lines[self.idx]
+            line = clean(raw_line)
             if not line:
-                self.index += 1
+                self.idx += 1
                 continue
 
-            page_match = re.match(r"--- Page (\d+) ---", line)
-            if page_match:
-                self.current_page = int(page_match.group(1))
-                self.index += 1
+            if line.startswith("PAGE "):
+                try:
+                    self.page = int(line.split()[1])
+                except (IndexError, ValueError):
+                    self.page = 0
+                self.idx += 1
                 continue
 
-            if line.startswith("Schedule I Part A"):
-                self.index = self._parse_schedule_i_part_a(self.index + 1)
-            elif line.startswith("Schedule I Part B"):
-                self.index = self._parse_schedule_i_part_b(self.index + 1)
-            elif line.startswith("Schedule I Part C"):
-                self.index = self._parse_schedule_i_part_c(self.index + 1)
-            elif line.startswith("Schedule I Part D"):
-                self.index = self._parse_schedule_i_part_d(self.index + 1)
-            elif line.startswith("Schedule I Part E"):
-                self.index = self._parse_schedule_i_part_e(self.index + 1)
-            elif line.startswith("Schedule II Part G"):
-                self.index = self._parse_schedule_ii_part_g(self.index + 1)
-            elif line.startswith("Schedule III"):
-                self.index = self._parse_schedule_iii(self.index + 1)
-            else:
-                self.index += 1
+            if line.startswith("SCHEDULE "):
+                self.schedule = line
+                self.idx += 1
+                continue
 
-    def _parse_schedule_i_part_a(self, idx: int) -> int:
-        while idx < len(self.lines):
-            idx = self._skip_blank_lines(idx)
-            if idx >= len(self.lines):
-                break
-            line = clean(self.lines[idx])
-            if not line or line.startswith("Schedule"):
-                break
-            entry, idx = self._parse_schedule_i_entry(idx, schedule="I", part="A")
-            if entry:
-                self.results["schedule_i_part_a"].append(entry)
-        return idx
-
-    def _parse_schedule_i_part_b(self, idx: int) -> int:
-        while idx < len(self.lines):
-            idx = self._skip_blank_lines(idx)
-            if idx >= len(self.lines):
-                break
-            line = clean(self.lines[idx])
-            if not line or line.startswith("Schedule"):
-                break
-            entry, idx = self._parse_schedule_i_entry(idx, schedule="I", part="B")
-            if entry:
-                self.results["schedule_i_part_b"].append(entry)
-        return idx
-
-    def _parse_schedule_i_part_c(self, idx: int) -> int:
-        while idx < len(self.lines):
-            idx = self._skip_blank_lines(idx)
-            if idx >= len(self.lines):
-                break
-            line = clean(self.lines[idx])
-            if not line or line.startswith("Schedule"):
-                break
-            entry, idx = self._parse_schedule_i_entry(idx, schedule="I", part="C")
-            if entry:
-                self.results["schedule_i_part_c"].append(entry)
-        return idx
-
-    def _parse_schedule_i_part_d(self, idx: int) -> int:
-        while idx < len(self.lines):
-            idx = self._skip_blank_lines(idx)
-            if idx >= len(self.lines):
-                break
-            line = clean(self.lines[idx])
-            if not line or line.startswith("Schedule"):
-                break
-            entry, idx = self._parse_schedule_i_entry(idx, schedule="I", part="D")
-            if entry:
-                self.results["schedule_i_part_d"].append(entry)
-        return idx
-
-    def _parse_schedule_i_part_e(self, idx: int) -> int:
-        while idx < len(self.lines):
-            idx = self._skip_blank_lines(idx)
-            if idx >= len(self.lines):
-                break
-            line = clean(self.lines[idx])
-            if not line or line.startswith("Schedule"):
-                break
-            entry, idx = self._parse_schedule_i_entry(idx, schedule="I", part="E")
-            if entry:
-                self.results["schedule_i_part_e"].append(entry)
-        return idx
-
-    def _parse_schedule_ii_part_g(self, idx: int) -> int:
-        while idx < len(self.lines):
-            idx = self._skip_blank_lines(idx)
-            if idx >= len(self.lines):
-                break
-            line = clean(self.lines[idx])
-            if not line or line.startswith("Schedule"):
-                break
-            entry, idx = self._parse_schedule_i_entry(idx, schedule="II", part="G")
-            if entry:
-                self.results["schedule_ii_part_g"].append(entry)
-        return idx
-
-    def _parse_schedule_iii(self, idx: int) -> int:
-        while idx < len(self.lines):
-            idx = self._skip_blank_lines(idx)
-            if idx >= len(self.lines):
-                break
-            line = clean(self.lines[idx])
-            if not line or line.startswith("Schedule"):
-                break
-            entry, idx = self._parse_schedule_iii_entry(idx)
-            if entry:
-                self.results["schedule_iii"].append(entry)
-        return idx
-
-    def _parse_schedule_i_entry(
-        self,
-        idx: int,
-        *,
-        schedule: str,
-        part: str,
-    ) -> Tuple[ContributionEntry | None, int]:
-        name, idx = collect_name(
-            self.lines,
-            idx,
-            (
-                "Address",
-                "City",
-                "Employer Name",
-                "Occupation",
-                "Date",
-                "Contribution Type",
-                "Amount",
-            ),
-        )
-        name = clean(name)
-        if not name:
-            return None, idx
-
-        entry = ContributionEntry(
-            schedule=schedule,
-            part=part,
-            page=self.current_page,
-            name=name,
-        )
-
-        city = ""
-        state = ""
-        zip_code = ""
-        occupation = ""
-        employer_name = ""
-        employer_city = ""
-        employer_state = ""
-        employer_zip = ""
-        employer_description = ""
-        description = ""
-
-        while idx < len(self.lines):
-            line = clean(self.lines[idx])
-            if not line:
-                idx += 1
-                continue
-            if line.startswith("Schedule"):
-                break
-            if line.startswith("Amount"):
-                entry.amount = parse_amount(line)
-                idx += 1
-                continue
-            if line.startswith("Date"):
-                month, day, year = parse_date_tokens(line)
-                entry.month = month
-                entry.day = day
-                entry.year = year
-                idx += 1
-                continue
-            if line.startswith("City"):
-                city, state_label, state_value, zip_label, zip_value, trailing = split_city_state_zip(
-                    line
-                )
-                entry.city = city
-                entry.state = state_value
-                entry.zip_code = zip_value
-                if trailing:
-                    description = trailing
-                idx += 1
-                continue
-            if line.startswith("State"):
-                entry.state, entry.zip_code = parse_state_zip_line(line)
-                idx += 1
-                continue
-            if line.startswith("Zip Code"):
-                _, entry.zip_code = parse_state_zip_line(line)
-                idx += 1
-                continue
-            if line.startswith("Country"):
-                idx += 1
-                continue
-            if line.startswith("Employer Name"):
-                employer_name, occupation = parse_employer_line(line)
-                entry.employer_name = employer_name
-                entry.occupation = occupation
-                idx += 1
-                continue
-            if line.startswith("Employer Address"):
-                employer_city, employer_state, employer_zip, employer_description = parse_employer_address_line(
-                    line
-                )
-                entry.employer_city = employer_city
-                entry.employer_state = employer_state
-                entry.employer_zip = employer_zip
-                entry.employer_description = employer_description
-                idx += 1
-                continue
-            if line.startswith("Contribution Type"):
-                entry.contributor_type = clean(line[len("Contribution Type") :])
-                idx += 1
-                continue
-            if line.startswith("Occupation"):
-                occupation = clean(line[len("Occupation") :])
-                entry.occupation = occupation
-                idx += 1
-                continue
-            if line.startswith("Contribution Description"):
-                description = clean(line[len("Contribution Description") :])
-                idx += 1
-                continue
-            if line.startswith("Contribution Received Date"):
-                month, day, year = parse_date_tokens(line)
-                entry.month = month
-                entry.day = day
-                entry.year = year
-                idx += 1
-                continue
-            if line.startswith("Contribution Amount"):
-                entry.amount = parse_amount(line)
-                idx += 1
-                continue
-            if line.startswith("Contribution Date"):
-                month, day, year = parse_date_tokens(line)
-                entry.month = month
-                entry.day = day
-                entry.year = year
-                idx += 1
-                continue
-            if line.startswith("Address"):
-                idx += 1
-                continue
-            if line.startswith("Type"):
-                entry.contributor_type = clean(line[len("Type") :])
-                idx += 1
-                continue
-            if line.startswith("Receipt"):
-                idx += 1
-                continue
-            if line.startswith("Contribution Nature"):
-                entry.description = clean(line[len("Contribution Nature") :])
-                idx += 1
-                continue
-            if line.startswith("Contribution Purpose"):
-                entry.description = clean(line[len("Contribution Purpose") :])
-                idx += 1
-                continue
-            if line.startswith("Contribution Period"):
-                idx += 1
-                continue
-            if line.startswith("Acknowledgement Number"):
-                idx += 1
-                continue
-            if line.startswith("State Committee ID"):
-                idx += 1
-                continue
-            if line.startswith("Payment Type"):
-                idx += 1
-                continue
-            if line.startswith("City and State"):
-                idx += 1
-                continue
-            if line.startswith("Employer"):
-                idx += 1
-                continue
-            if line.startswith("Date Received"):
-                month, day, year = parse_date_tokens(line)
-                entry.month = month
-                entry.day = day
-                entry.year = year
-                idx += 1
-                continue
-            if line.startswith("Amount Total"):
-                entry.amount = parse_amount(line)
-                idx += 1
-                continue
-            if line.startswith("Year To Date"):
-                idx += 1
-                continue
-            if line.startswith("Occupation & Employer"):
-                idx += 1
-                continue
-            if line.startswith("Occupation/Employer"):
-                idx += 1
-                continue
-            if line.startswith("Other Type"):
-                entry.contributor_type = clean(line[len("Other Type") :])
-                idx += 1
-                continue
-            if line.startswith("Employer City"):
-                entry.employer_city = clean(line[len("Employer City") :])
-                idx += 1
-                continue
-            if line.startswith("Employer State"):
-                entry.employer_state = clean(line[len("Employer State") :])
-                idx += 1
-                continue
-            if line.startswith("Employer Zip"):
-                entry.employer_zip = clean(line[len("Employer Zip") :])
-                idx += 1
-                continue
-            if line.startswith("Employer Description"):
-                entry.employer_description = clean(line[len("Employer Description") :])
-                idx += 1
-                continue
-            if line.startswith("Employer City State Zip"):
-                entry.employer_city, entry.employer_state, entry.employer_zip = parse_state_zip_description_line(line)
-                idx += 1
-                continue
-            if line.startswith("City State Zip"):
-                entry.city, entry.state, entry.zip_code = parse_state_zip_description_line(line)
-                idx += 1
-                continue
-            if line.startswith("Zip"):
-                _, entry.zip_code = parse_state_zip_line(line)
-                idx += 1
-                continue
-            if line.startswith("Employer Address Line"):
-                idx += 1
-                continue
-            if line.startswith("Occupation Description"):
-                entry.description = clean(line[len("Occupation Description") :])
-                idx += 1
-                continue
-            if line.startswith("Occupation Description Continued"):
-                extra = clean(line[len("Occupation Description Continued") :])
-                if entry.description:
-                    entry.description = f"{entry.description} {extra}".strip()
+            if line.startswith("PART "):
+                # Header like "PART A" -> part token after space.
+                tokens = line.split()
+                if len(tokens) >= 2:
+                    self.part = tokens[1]
                 else:
-                    entry.description = extra
-                idx += 1
-                continue
-            if line.startswith("City State"):
-                idx += 1
-                continue
-            if line.startswith("Account"):
-                idx += 1
-                continue
-            if line.startswith("Zip Code"):
-                idx += 1
-                continue
-            if line.startswith("City/State/Zip"):
-                idx += 1
-                continue
-            if line.startswith("Occupation and Employer"):
-                idx += 1
-                continue
-            if line.startswith("Occupation/Employer and Mailing Address"):
-                idx += 1
-                continue
-            if line.startswith("Occupation and Mailing Address"):
-                idx += 1
+                    self.part = line.replace("PART", "").strip()
+                self.idx += 1
                 continue
 
+            if self.schedule == "SCHEDULE I":
+                if self.part == "A" and line.startswith("Full Name of Contributing Committee"):
+                    entry, new_idx = self._parse_schedule_i_part_a()
+                    self.results["schedule_i_part_a"].append(entry)
+                    self.idx = new_idx
+                    continue
+                if self.part == "B" and line.startswith("Full Name of Contributor"):
+                    entry, new_idx = self._parse_schedule_i_part_b()
+                    self.results["schedule_i_part_b"].append(entry)
+                    self.idx = new_idx
+                    continue
+                if self.part == "C" and line.startswith("Full Name of Contributing Committee"):
+                    entry, new_idx = self._parse_schedule_i_part_c()
+                    self.results["schedule_i_part_c"].append(entry)
+                    self.idx = new_idx
+                    continue
+                if self.part == "D" and line.startswith("Full Name of Contributor"):
+                    entry, new_idx = self._parse_schedule_i_part_d()
+                    self.results["schedule_i_part_d"].append(entry)
+                    self.idx = new_idx
+                    continue
+                if self.part == "E" and line.startswith("Full Name"):
+                    entry, new_idx = self._parse_schedule_i_part_e()
+                    self.results["schedule_i_part_e"].append(entry)
+                    self.idx = new_idx
+                    continue
+
+            if self.schedule == "SCHEDULE II":
+                if self.part == "G" and line.startswith("Full Name of Contributor"):
+                    entry, new_idx = self._parse_schedule_ii_part_g()
+                    self.results["schedule_ii_part_g"].append(entry)
+                    self.idx = new_idx
+                    continue
+
+            if self.schedule == "SCHEDULE III":
+                if line.startswith("To Whom Paid"):
+                    entry, new_idx = self._parse_schedule_iii()
+                    self.results["schedule_iii"].append(entry)
+                    self.idx = new_idx
+                    continue
+
+            self.idx += 1
+
+    def _parse_schedule_i_part_a(self) -> Tuple[ContributionEntry, int]:
+        idx = self.idx
+        idx += 1  # skip "Full Name..." line
+        if idx < len(self.lines) and clean(self.lines[idx]) == "MO DAY YEAR":
             idx += 1
 
-        entry.occupation = entry.occupation or occupation
-        entry.employer_name = entry.employer_name or employer_name
-        entry.employer_city = entry.employer_city or employer_city
-        entry.employer_state = entry.employer_state or employer_state
-        entry.employer_zip = entry.employer_zip or employer_zip
-        entry.employer_description = entry.employer_description or employer_description
-        entry.description = entry.description or description
+        name, idx = collect_name(
+            self.lines, idx, ("Mailing Address",)
+        )
 
+        mailing_line = clean(self.lines[idx]) if idx < len(self.lines) else ""
+        amount = parse_amount(mailing_line)
+        idx += 1
+
+        month = day = year = ""
+        if idx < len(self.lines):
+            potential_date = clean(self.lines[idx])
+            if re.fullmatch(r"\d{1,2}\s+\d{1,2}\s+\d{4}", potential_date):
+                month, day, year = potential_date.split()
+                idx += 1
+
+        city_line = clean(self.lines[idx]) if idx < len(self.lines) else ""
+        city, _, _, _, _, trailing = split_city_state_zip(city_line)
+        if not (month and day and year):
+            m, d, y = parse_date_tokens(trailing)
+            month = month or m
+            day = day or d
+            year = year or y
+        idx += 1
+
+        state_line = clean(self.lines[idx]) if idx < len(self.lines) else ""
+        state, zip_code = parse_state_zip_line(state_line)
+        idx += 1
+
+        idx = self._skip_blank_lines(idx)
+
+        entry = ContributionEntry(
+            schedule="I",
+            part="A",
+            page=self.page,
+            name=name,
+            amount=amount,
+            month=month,
+            day=day,
+            year=year,
+            city=city,
+            state=state,
+            zip_code=zip_code,
+            contributor_type="Political Committee",
+        )
         return entry, idx
 
-    def _parse_schedule_iii_entry(self, idx: int) -> Tuple[ExpenditureEntry | None, int]:
+    def _parse_schedule_i_part_b(self) -> Tuple[ContributionEntry, int]:
+        idx = self.idx
+        idx += 1  # skip "Full Name..." line
+        if idx < len(self.lines) and clean(self.lines[idx]) == "MO DAY YEAR":
+            idx += 1
+
         name, idx = collect_name(
-            self.lines,
-            idx,
-            (
-                "Address",
-                "Amount",
-                "Date",
-                "City",
-                "State",
-                "Zip Code",
-                "Purpose",
-                "Description",
-            ),
+            self.lines, idx, ("Mailing Address",)
         )
-        name = clean(name)
-        if not name:
-            return None, idx
+
+        mailing_line = clean(self.lines[idx]) if idx < len(self.lines) else ""
+        amount = parse_amount(mailing_line)
+        idx += 1
+
+        month = day = year = ""
+        # For part B, date may be appended to the next line.
+        city_line = clean(self.lines[idx]) if idx < len(self.lines) else ""
+        if city_line and re.fullmatch(r"\d{1,2}\s+\d{1,2}\s+\d{4}", city_line):
+            month, day, year = city_line.split()
+            idx += 1
+            city_line = clean(self.lines[idx]) if idx < len(self.lines) else ""
+
+        city, _, _, _, _, trailing = split_city_state_zip(city_line)
+        if not (month and day and year):
+            m, d, y = parse_date_tokens(trailing)
+            month = month or m
+            day = day or d
+            year = year or y
+        idx += 1
+
+        state_line = clean(self.lines[idx]) if idx < len(self.lines) else ""
+        state, zip_code = parse_state_zip_line(state_line)
+        idx += 1
+
+        idx = self._skip_blank_lines(idx)
+
+        entry = ContributionEntry(
+            schedule="I",
+            part="B",
+            page=self.page,
+            name=name,
+            amount=amount,
+            month=month,
+            day=day,
+            year=year,
+            city=city,
+            state=state,
+            zip_code=zip_code,
+            contributor_type="Other",
+        )
+        return entry, idx
+
+    def _parse_schedule_i_part_c(self) -> Tuple[ContributionEntry, int]:
+        idx = self.idx
+        idx += 1  # skip "Full Name..." line
+        if idx < len(self.lines) and clean(self.lines[idx]) == "MO DAY YEAR":
+            idx += 1
+
+        name, idx = collect_name(
+            self.lines, idx, ("$", "Mailing Address")
+        )
+
+        month = day = year = ""
+        amount_line = clean(self.lines[idx]) if idx < len(self.lines) else ""
+        amount = parse_amount(amount_line)
+        if amount:
+            idx += 1
+
+        if idx < len(self.lines) and clean(self.lines[idx]).startswith("Mailing Address"):
+            idx += 1
+
+        month = day = year = ""
+        date_line = clean(self.lines[idx]) if idx < len(self.lines) else ""
+        if re.fullmatch(r"\d{1,2}\s+\d{1,2}\s+\d{4}", date_line):
+            month, day, year = date_line.split()
+            idx += 1
+
+        city_line = clean(self.lines[idx]) if idx < len(self.lines) else ""
+        city, _, _, _, _, trailing = split_city_state_zip(city_line)
+        if not (month and day and year):
+            m, d, y = parse_date_tokens(trailing)
+            month = month or m
+            day = day or d
+            year = year or y
+        idx += 1
+
+        state_line = clean(self.lines[idx]) if idx < len(self.lines) else ""
+        state, zip_code = parse_state_zip_line(state_line)
+        idx += 1
+
+        idx = self._skip_blank_lines(idx)
+
+        entry = ContributionEntry(
+            schedule="I",
+            part="C",
+            page=self.page,
+            name=name,
+            amount=amount,
+            month=month,
+            day=day,
+            year=year,
+            city=city,
+            state=state,
+            zip_code=zip_code,
+            contributor_type="Political Committee",
+        )
+        return entry, idx
+
+    def _parse_schedule_i_part_d(self) -> Tuple[ContributionEntry, int]:
+        idx = self.idx
+        idx += 1  # skip "Full Name..." line
+        date_line = clean(self.lines[idx]) if idx < len(self.lines) else ""
+        month, day, year = parse_date_tokens(date_line)
+        amount = parse_amount(date_line)
+        idx += 1
+
+        name, idx = collect_name(
+            self.lines, idx, ("Mailing Address",)
+        )
+
+        if idx < len(self.lines) and clean(self.lines[idx]).startswith("Mailing Address"):
+            idx += 1
+
+        date_line = clean(self.lines[idx]) if idx < len(self.lines) else ""
+        if re.fullmatch(r"\d{1,2}\s+\d{1,2}\s+\d{4}", date_line):
+            month = month or date_line.split()[0]
+            day = day or date_line.split()[1]
+            year = year or date_line.split()[2]
+            idx += 1
+
+        city_line = clean(self.lines[idx]) if idx < len(self.lines) else ""
+        city, _, _, _, _, _ = split_city_state_zip(city_line)
+        idx += 1
+
+        state_line = clean(self.lines[idx]) if idx < len(self.lines) else ""
+        state, zip_code = parse_state_zip_line(state_line)
+        idx += 1
+
+        employer_line = clean(self.lines[idx]) if idx < len(self.lines) else ""
+        employer_name, occupation = parse_employer_line(employer_line)
+        idx += 1
+
+        mailing_label_line = clean(self.lines[idx]) if idx < len(self.lines) else ""
+        if mailing_label_line.startswith("Employer Mailing Address"):
+            idx += 1
+        employer_address_line = clean(self.lines[idx]) if idx < len(self.lines) else ""
+        employer_city, employer_state, employer_zip, _ = parse_employer_address_line(
+            employer_address_line
+        )
+        idx += 1
+
+        idx = self._skip_blank_lines(idx)
+
+        entry = ContributionEntry(
+            schedule="I",
+            part="D",
+            page=self.page,
+            name=name,
+            amount=amount,
+            month=month,
+            day=day,
+            year=year,
+            city=city,
+            state=state,
+            zip_code=zip_code,
+            contributor_type="Other",
+            employer_name=employer_name,
+            occupation=occupation,
+            employer_city=employer_city,
+            employer_state=employer_state,
+            employer_zip=employer_zip,
+        )
+        return entry, idx
+
+    def _parse_schedule_i_part_e(self) -> Tuple[ContributionEntry, int]:
+        idx = self.idx
+        idx += 1  # skip "Full Name" line
+        amount = ""
+        if idx < len(self.lines):
+            prelim = clean(self.lines[idx])
+            if prelim.startswith("MO DAY YEAR"):
+                amount = parse_amount(prelim)
+                idx += 1
+
+        name, idx = collect_name(
+            self.lines, idx, ("Mailing Address",)
+        )
+
+        if idx < len(self.lines) and clean(self.lines[idx]).startswith("Mailing Address"):
+            idx += 1
+
+        date_line = clean(self.lines[idx]) if idx < len(self.lines) else ""
+        month = day = year = ""
+        if re.fullmatch(r"\d{1,2}\s+\d{1,2}\s+\d{4}", date_line):
+            month, day, year = date_line.split()
+            idx += 1
+
+        city_line = clean(self.lines[idx]) if idx < len(self.lines) else ""
+        city, _, _, _, _, _ = split_city_state_zip(city_line)
+        idx += 1
+
+        state_line = clean(self.lines[idx]) if idx < len(self.lines) else ""
+        state, zip_code = parse_state_zip_line(state_line)
+        idx += 1
+
+        description_line = clean(self.lines[idx]) if idx < len(self.lines) else ""
+        description = ""
+        if description_line.startswith("Receipt Description"):
+            description = description_line.split("Receipt Description", 1)[1].strip()
+            idx += 1
+
+        idx = self._skip_blank_lines(idx)
+
+        entry = ContributionEntry(
+            schedule="I",
+            part="E",
+            page=self.page,
+            name=name,
+            amount=amount,
+            month=month,
+            day=day,
+            year=year,
+            city=city,
+            state=state,
+            zip_code=zip_code,
+            contributor_type="Receipt",
+            description=description,
+        )
+        return entry, idx
+
+    def _parse_schedule_ii_part_g(self) -> Tuple[ContributionEntry, int]:
+        idx = self.idx
+        idx += 1  # skip "Full Name..." line
+        if idx < len(self.lines) and clean(self.lines[idx]) == "MO DAY YEAR":
+            idx += 1
+
+        name, idx = collect_name(
+            self.lines, idx, ("$", "Mailing Address")
+        )
+
+        month = day = year = ""
+        amount_line = clean(self.lines[idx]) if idx < len(self.lines) else ""
+        amount = parse_amount(amount_line)
+        if amount:
+            idx += 1
+
+        if idx < len(self.lines) and clean(self.lines[idx]).startswith("Mailing Address"):
+            mail_line = clean(self.lines[idx])
+            m, d, y = parse_date_tokens(mail_line)
+            if m:
+                month = m
+                day = d
+                year = y
+            idx += 1
+
+        date_line = clean(self.lines[idx]) if idx < len(self.lines) else ""
+        if re.fullmatch(r"\d{1,2}\s+\d{1,2}\s+\d{4}", date_line):
+            month, day, year = date_line.split()
+            idx += 1
+
+        city_line = clean(self.lines[idx]) if idx < len(self.lines) else ""
+        city, _, _, _, _, _ = split_city_state_zip(city_line)
+        idx += 1
+
+        state_line = clean(self.lines[idx]) if idx < len(self.lines) else ""
+        state, zip_code = parse_state_zip_line(state_line)
+        idx += 1
+
+        employer_line = clean(self.lines[idx]) if idx < len(self.lines) else ""
+        employer_name, occupation = parse_employer_line(employer_line)
+        idx += 1
+
+        mailing_label_line = clean(self.lines[idx]) if idx < len(self.lines) else ""
+        if mailing_label_line.startswith("Employer Mailing Address"):
+            idx += 1
+
+        value_line = clean(self.lines[idx]) if idx < len(self.lines) else ""
+        employer_city, employer_state, employer_zip, description = parse_employer_address_line(
+            value_line
+        )
+        idx += 1
+
+        idx = self._skip_blank_lines(idx)
+
+        entry = ContributionEntry(
+            schedule="II",
+            part="G",
+            page=self.page,
+            name=name,
+            amount=amount,
+            month=month,
+            day=day,
+            year=year,
+            city=city,
+            state=state,
+            zip_code=zip_code,
+            contributor_type="In-Kind",
+            employer_name=employer_name,
+            occupation=occupation,
+            employer_city=employer_city,
+            employer_state=employer_state,
+            employer_zip=employer_zip,
+            description=description,
+        )
+        return entry, idx
+
+    def _parse_schedule_iii(self) -> Tuple[ExpenditureEntry, int]:
+        idx = self.idx
+        idx += 1  # skip "To Whom Paid"
+        if idx < len(self.lines) and clean(self.lines[idx]) == "MO DAY YEAR":
+            idx += 1
+
+        payee, idx = collect_name(
+            self.lines, idx, ("Mailing Address",)
+        )
+
+        mailing_line = clean(self.lines[idx]) if idx < len(self.lines) else ""
+        month, day, year = parse_date_tokens(mailing_line)
+        amount = parse_amount(mailing_line)
+        idx += 1
+
+        city = ""
+        if idx < len(self.lines):
+            city_info_line = clean(self.lines[idx])
+            if city_info_line.startswith("City"):
+                city, _, _, _, _, _ = split_city_state_zip(city_info_line)
+                idx += 1
+
+        state_line = clean(self.lines[idx]) if idx < len(self.lines) else ""
+        state, zip_code, description = parse_state_zip_description_line(state_line)
+        idx += 1
+
+        description = description.strip()
+        while idx < len(self.lines):
+            continuation = clean(self.lines[idx])
+            if not continuation:
+                idx += 1
+                continue
+            if continuation.startswith(
+                (
+                    "To Whom Paid",
+                    "MO DAY YEAR",
+                    "Mailing Address",
+                    "City ",
+                )
+            ):
+                break
+            if continuation.startswith("--- Page") or continuation.startswith("PAGE "):
+                break
+            if PAGE_TIMESTAMP_RE.fullmatch(continuation):
+                break
+            description = f"{description} {continuation}".strip() if description else continuation
+            idx += 1
+
+        idx = self._skip_blank_lines(idx)
 
         entry = ExpenditureEntry(
             schedule="III",
-            page=self.current_page,
-            payee=name,
+            page=self.page,
+            payee=payee,
+            amount=amount,
+            month=month,
+            day=day,
+            year=year,
+            city=city,
+            state=state,
+            zip_code=zip_code,
+            description=description,
         )
-
-        while idx < len(self.lines):
-            line = clean(self.lines[idx])
-            if not line:
-                idx += 1
-                continue
-            if line.startswith("Schedule"):
-                break
-            if line.startswith("Amount"):
-                entry.amount = parse_amount(line)
-                idx += 1
-                continue
-            if line.startswith("Date"):
-                month, day, year = parse_date_tokens(line)
-                entry.month = month
-                entry.day = day
-                entry.year = year
-                idx += 1
-                continue
-            if line.startswith("City"):
-                entry.city, _, entry.state, _, entry.zip_code, _ = split_city_state_zip(line)
-                idx += 1
-                continue
-            if line.startswith("State"):
-                entry.state, entry.zip_code = parse_state_zip_line(line)
-                idx += 1
-                continue
-            if line.startswith("Zip Code"):
-                _, entry.zip_code = parse_state_zip_line(line)
-                idx += 1
-                continue
-            if line.startswith("Purpose"):
-                entry.description = clean(line[len("Purpose") :])
-                idx += 1
-                continue
-            if line.startswith("Description"):
-                description = clean(line[len("Description") :])
-                if entry.description:
-                    entry.description = f"{entry.description} {description}".strip()
-                else:
-                    entry.description = description
-                idx += 1
-                continue
-
-            idx += 1
-
         return entry, idx
 
     def _skip_blank_lines(self, idx: int) -> int:

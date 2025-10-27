@@ -39,7 +39,11 @@ uploaded_pdf = st.file_uploader(
 
 parser_selection = st.radio(
     "Select workflow",
-    options=("Michigan", "Arizona", "Finance Pipeline"),
+    options=(
+        "Michigan Campaign Report Summary and Schedules",
+        "Arizona Campaign Finance Report",
+        "Pennsylvania Campaign Finance Report",
+    ),
 )
 
 
@@ -59,8 +63,8 @@ if uploaded_pdf is not None:
     )
 
     try:
-        if parser_selection == "Michigan":
-            with st.spinner("Parsing Michigan PDF..."):
+        if parser_selection == "Michigan Campaign Report Summary and Schedules":
+            with st.spinner("Parsing Michigan campaign report..."):
                 parser = ReportParser(tmp_path)
                 contributions = parser.parse_contributions()
                 other_receipts = parser.parse_other_receipts()
@@ -113,14 +117,23 @@ if uploaded_pdf is not None:
                 file_name="mi_campaign_finance.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
-        elif parser_selection == "Arizona":
-            with st.spinner("Parsing Arizona PDF..."):
+        elif parser_selection == "Arizona Campaign Finance Report":
+            with st.spinner("Parsing Arizona campaign report..."):
                 parser = AZReportParser(tmp_path)
                 az_contributions = parser.parse_contributions()
+                az_small_contrib = parser.parse_in_state_small_contributions()
+                az_operating = parser.parse_operating_expenses()
+                az_small_expenses = parser.parse_aggregate_small_expenses()
+                az_other_receipts = parser.parse_other_receipts()
 
-            st.success(f"Parsed {len(az_contributions)} individual contributions.")
+            st.success(
+                "Parsed "
+                f"{len(az_contributions)} individual contributions, "
+                f"{len(az_operating)} operating expenses, and "
+                f"{len(az_other_receipts)} other receipts."
+            )
 
-            expected_columns = [
+            contrib_columns = [
                 "LAST NAME",
                 "FIRST NAME",
                 "ADDRESS (Line 1)",
@@ -137,9 +150,9 @@ if uploaded_pdf is not None:
             ]
             contrib_df = pd.DataFrame(entry.to_csv_row() for entry in az_contributions)
             if contrib_df.empty:
-                contrib_df = pd.DataFrame(columns=expected_columns)
+                contrib_df = pd.DataFrame(columns=contrib_columns)
             else:
-                contrib_df = contrib_df[expected_columns]
+                contrib_df = contrib_df[contrib_columns]
                 contrib_df["DATE"] = pd.to_datetime(contrib_df["DATE"], errors="coerce", format="%m/%d/%Y")
                 contrib_df["AMOUNT"] = pd.to_numeric(
                     contrib_df["AMOUNT"]
@@ -149,12 +162,81 @@ if uploaded_pdf is not None:
                 )
                 contrib_df["TOTAL TO DATE"] = pd.to_numeric(contrib_df["TOTAL TO DATE"], errors="coerce")
 
-            st.subheader("Contributions Preview")
-            st.dataframe(contrib_df.head(25), use_container_width=True)
+            small_contrib_df = pd.DataFrame(az_small_contrib)
+            if small_contrib_df.empty:
+                small_contrib_df = pd.DataFrame(columns=["Label", "Value"])
+
+            operating_columns = [
+                "NAME",
+                "ADDRESS",
+                "DATE",
+                "AMOUNT",
+                "PAYMENT METHOD",
+                "CYCLE TO DATE",
+                "CATEGORY",
+                "TRANSACTION TYPE",
+                "MEMO",
+                "DETAILS",
+                "RAW",
+            ]
+            operating_df = pd.DataFrame(entry.to_csv_row() for entry in az_operating)
+            if operating_df.empty:
+                operating_df = pd.DataFrame(columns=operating_columns)
+            else:
+                operating_df = operating_df[operating_columns]
+
+            small_expenses_df = pd.DataFrame(az_small_expenses)
+            if small_expenses_df.empty:
+                small_expenses_df = pd.DataFrame(columns=["Label", "Value"])
+
+            other_receipt_columns = [
+                "NAME",
+                "ADDRESS",
+                "DATE",
+                "AMOUNT",
+                "PAYMENT METHOD",
+                "CYCLE TO DATE",
+                "TRANSACTION TYPE",
+                "MEMO",
+                "DETAILS",
+                "RAW",
+            ]
+            other_receipts_df = pd.DataFrame(entry.to_csv_row() for entry in az_other_receipts)
+            if other_receipts_df.empty:
+                other_receipts_df = pd.DataFrame(columns=other_receipt_columns)
+            else:
+                other_receipts_df = other_receipts_df[other_receipt_columns]
+
+            tab_titles = [
+                "Schedule C2 - Individual Contributions",
+                "Schedule In-State <=$100",
+                "Schedule E1 - Operating Expenses",
+                "Schedule E4 - Aggregate Small Expenses",
+                "Schedule R1 - Other Receipts",
+            ]
+            tabs = st.tabs(tab_titles)
+
+            with tabs[0]:
+                st.dataframe(contrib_df.head(25), use_container_width=True)
+                st.caption("Preview limited to the first 25 rows.")
+            with tabs[1]:
+                st.dataframe(small_contrib_df, use_container_width=True)
+            with tabs[2]:
+                st.dataframe(operating_df.head(25), use_container_width=True)
+                st.caption("Preview limited to the first 25 rows.")
+            with tabs[3]:
+                st.dataframe(small_expenses_df, use_container_width=True)
+            with tabs[4]:
+                st.dataframe(other_receipts_df.head(25), use_container_width=True)
+                st.caption("Preview limited to the first 25 rows.")
 
             output_stream = io.BytesIO()
             with pd.ExcelWriter(output_stream, engine="xlsxwriter") as writer:
-                contrib_df.to_excel(writer, sheet_name="Contributions", index=False)
+                contrib_df.to_excel(writer, sheet_name="Schedule C2", index=False)
+                small_contrib_df.to_excel(writer, sheet_name="Schedule In-State <=100", index=False)
+                operating_df.to_excel(writer, sheet_name="Schedule E1", index=False)
+                small_expenses_df.to_excel(writer, sheet_name="Schedule E4", index=False)
+                other_receipts_df.to_excel(writer, sheet_name="Schedule R1", index=False)
             output_stream.seek(0)
 
             st.download_button(
@@ -164,7 +246,7 @@ if uploaded_pdf is not None:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
         else:
-            with st.spinner("Running Finance pipeline..."):
+            with st.spinner("Running Pennsylvania campaign finance pipeline..."):
                 with tempfile.TemporaryDirectory() as pipeline_dir:
                     base_path = Path(pipeline_dir)
                     text_root = base_path / "text_output"

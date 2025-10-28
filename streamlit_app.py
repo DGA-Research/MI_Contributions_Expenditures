@@ -26,11 +26,11 @@ from pa_txt_parser import parse_txt_bytes
 
 st.set_page_config(page_title="Campaign Finance Parser", layout="wide")
 st.title("Campaign Finance Parser")
-st.write(
-    "Upload a campaign finance PDF and choose the parsing workflow. "
-    "Michigan and Arizona paths mirror their respective schedules, while the Finance pipeline "
-    "runs the text -> CSV -> Excel process from the FinanceWork tooling."
-)
+#st.write(
+#    "Upload a campaign finance PDF and choose the parsing workflow. "
+#    "Michigan and Arizona paths mirror their respective schedules, while the Finance pipeline "
+#    "runs the text -> CSV -> Excel process from the FinanceWork tooling."
+#)
 
 
 parser_selection = st.radio(
@@ -385,3 +385,4 @@ if uploaded_file is not None:
     finally:
         if tmp_path and tmp_path.exists():
             tmp_path.unlink()
+

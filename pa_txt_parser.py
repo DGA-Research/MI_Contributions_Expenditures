@@ -23,6 +23,8 @@ def parse_txt_bytes(data: bytes, *, encoding: str = "utf-8") -> pd.DataFrame:
 
     for row in reader:
         cleaned = [cell.strip() for cell in row]
+        if not cleaned or not any(cell for cell in cleaned):
+            continue
         max_cols = max(max_cols, len(cleaned))
         rows.append(cleaned)
 

@@ -31,13 +31,6 @@ st.write(
 )
 
 
-uploaded_pdf = st.file_uploader(
-    "Select the PDF file",
-    type=["pdf"],
-    accept_multiple_files=False,
-    help="Supported workflows: Michigan Candidate Report PDFs, Arizona Schedule C2 filings, or FinanceWork text -> CSV -> Excel pipeline.",
-)
-
 parser_selection = st.radio(
     "Select workflow",
     options=(
@@ -49,11 +42,44 @@ parser_selection = st.radio(
     ),
 )
 
+uploader_key = f"uploader_{parser_selection.replace(' ', '_').replace('/', '_')}"
+uploaded_pdf = st.file_uploader(
+    "Upload a PDF for the selected workflow",
+    type=["pdf"],
+    accept_multiple_files=False,
+    key=uploader_key,
+)
+
+if uploaded_pdf is None:
+    st.info("Select a workflow and upload the corresponding PDF to begin parsing.")
 
 def _entries_to_dataframe(entries) -> pd.DataFrame:
     """Convert parser entries to a tabular structure suitable for Excel."""
     rows = [entry.to_csv_row() for entry in entries]
     return pd.DataFrame(rows)
+
+
+def _render_dataframe_tabs(tab_entries):
+    if not tab_entries:
+        st.info("No tabular data available.")
+        return
+    tab_objects = st.tabs([title for title, _ in tab_entries])
+    for tab, (title, df) in zip(tab_objects, tab_entries):
+        with tab:
+            if df is None or (hasattr(df, "empty") and df.empty):
+                st.info("No rows available.")
+            else:
+                st.dataframe(df.head(25), use_container_width=True)
+                st.caption("Preview limited to the first 25 rows.")
+
+
+def _preview_workbook_bytes(workbook_bytes: bytes) -> None:
+    tab_entries = []
+    with pd.ExcelFile(io.BytesIO(workbook_bytes)) as xl:
+        for sheet_name in xl.sheet_names:
+            df = xl.parse(sheet_name=sheet_name, nrows=25)
+            tab_entries.append((sheet_name, df.fillna("")))
+    _render_dataframe_tabs(tab_entries)
 
 
 if uploaded_pdf is not None:
@@ -84,26 +110,20 @@ if uploaded_pdf is not None:
                 f"{len(expenditures)} expenditures."
             )
 
-            contrib_df = _entries_to_dataframe(contributions)
-            other_receipts_df = _entries_to_dataframe(other_receipts)
-            in_kind_df = _entries_to_dataframe(in_kind_contributions)
-            fundraisers_df = _entries_to_dataframe(fundraisers)
-            expend_df = _entries_to_dataframe(expenditures)
+            contrib_df = _entries_to_dataframe(contributions).fillna("")
+            other_receipts_df = _entries_to_dataframe(other_receipts).fillna("")
+            in_kind_df = _entries_to_dataframe(in_kind_contributions).fillna("")
+            fundraisers_df = _entries_to_dataframe(fundraisers).fillna("")
+            expend_df = _entries_to_dataframe(expenditures).fillna("")
 
-            st.subheader("Contributions Preview")
-            st.dataframe(contrib_df.head(25), use_container_width=True)
-
-            st.subheader("Other Receipts Preview")
-            st.dataframe(other_receipts_df.head(25), use_container_width=True)
-
-            st.subheader("In-Kind Contributions Preview")
-            st.dataframe(in_kind_df.head(25), use_container_width=True)
-
-            st.subheader("Fundraisers Preview")
-            st.dataframe(fundraisers_df.head(25), use_container_width=True)
-
-            st.subheader("Expenditures Preview")
-            st.dataframe(expend_df.head(25), use_container_width=True)
+            michigan_tabs = [
+                ("Contributions", contrib_df),
+                ("Other Receipts", other_receipts_df),
+                ("In-Kind Contributions", in_kind_df),
+                ("Fundraisers", fundraisers_df),
+                ("Expenditures", expend_df),
+            ]
+            _render_dataframe_tabs(michigan_tabs)
 
             output_stream = io.BytesIO()
             with pd.ExcelWriter(output_stream, engine="xlsxwriter") as writer:
@@ -165,7 +185,7 @@ if uploaded_pdf is not None:
                 )
                 contrib_df["TOTAL TO DATE"] = pd.to_numeric(contrib_df["TOTAL TO DATE"], errors="coerce")
 
-            small_contrib_df = pd.DataFrame(az_small_contrib)
+            small_contrib_df = pd.DataFrame(az_small_contrib).fillna("")
             if small_contrib_df.empty:
                 small_contrib_df = pd.DataFrame(columns=["Label", "Value"])
 
@@ -186,9 +206,9 @@ if uploaded_pdf is not None:
             if operating_df.empty:
                 operating_df = pd.DataFrame(columns=operating_columns)
             else:
-                operating_df = operating_df[operating_columns]
+                operating_df = operating_df[operating_columns].fillna("")
 
-            small_expenses_df = pd.DataFrame(az_small_expenses)
+            small_expenses_df = pd.DataFrame(az_small_expenses).fillna("")
             if small_expenses_df.empty:
                 small_expenses_df = pd.DataFrame(columns=["Label", "Value"])
 
@@ -208,30 +228,16 @@ if uploaded_pdf is not None:
             if other_receipts_df.empty:
                 other_receipts_df = pd.DataFrame(columns=other_receipt_columns)
             else:
-                other_receipts_df = other_receipts_df[other_receipt_columns]
+                other_receipts_df = other_receipts_df[other_receipt_columns].fillna("")
 
-            tab_titles = [
-                "Schedule C2 - Individual Contributions",
-                "Schedule In-State <=$100",
-                "Schedule E1 - Operating Expenses",
-                "Schedule E4 - Aggregate Small Expenses",
-                "Schedule R1 - Other Receipts",
+            arizona_tabs = [
+                ("Schedule C2 - Individual Contributions", contrib_df),
+                ("Schedule In-State <=$100", small_contrib_df),
+                ("Schedule E1 - Operating Expenses", operating_df),
+                ("Schedule E4 - Aggregate Small Expenses", small_expenses_df),
+                ("Schedule R1 - Other Receipts", other_receipts_df),
             ]
-            tabs = st.tabs(tab_titles)
-
-            with tabs[0]:
-                st.dataframe(contrib_df.head(25), use_container_width=True)
-                st.caption("Preview limited to the first 25 rows.")
-            with tabs[1]:
-                st.dataframe(small_contrib_df, use_container_width=True)
-            with tabs[2]:
-                st.dataframe(operating_df.head(25), use_container_width=True)
-                st.caption("Preview limited to the first 25 rows.")
-            with tabs[3]:
-                st.dataframe(small_expenses_df, use_container_width=True)
-            with tabs[4]:
-                st.dataframe(other_receipts_df.head(25), use_container_width=True)
-                st.caption("Preview limited to the first 25 rows.")
+            _render_dataframe_tabs(arizona_tabs)
 
             output_stream = io.BytesIO()
             with pd.ExcelWriter(output_stream, engine="xlsxwriter") as writer:
@@ -260,6 +266,8 @@ if uploaded_pdf is not None:
 
             st.success("Parsed Alaska POFD schedules.")
 
+            _preview_workbook_bytes(workbook_bytes)
+
             workbook_stream = io.BytesIO(workbook_bytes)
             workbook_stream.seek(0)
             st.download_button(
@@ -279,6 +287,8 @@ if uploaded_pdf is not None:
                     workbook_bytes = workbook_path.read_bytes()
 
             st.success("Parsed federal financial disclosure schedules.")
+
+            _preview_workbook_bytes(workbook_bytes)
 
             workbook_stream = io.BytesIO(workbook_bytes)
             workbook_stream.seek(0)
@@ -315,6 +325,8 @@ if uploaded_pdf is not None:
                     "No schedule CSV files were produced; the downloaded workbook contains a status note "
                     "in place of detailed schedules."
                 )
+
+            _preview_workbook_bytes(workbook_bytes)
 
             workbook_stream = io.BytesIO(workbook_bytes)
             workbook_stream.seek(0)

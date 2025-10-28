@@ -1,47 +1,41 @@
 # Campaign Finance Parser
 
-Streamlit app that normalizes several campaign finance parsers behind a single UI. Each workflow accepts the appropriate filing format, shows a tabbed preview (first 25 rows per sheet), and lets you download the cleaned output.
+Streamlit application that aggregates multiple campaign-finance parsers behind a single interface. Each workflow accepts state-specific filings, shows a tabbed preview, and offers cleaned downloads.
 
 ## Workflows
 
 | Workflow | Input | Output |
 | --- | --- | --- |
-| Michigan Campaign Report Summary | PDF | Multi-sheet Excel (Contributions, Other Receipts, In-Kind, Fundraisers, Expenditures) |
-| Arizona Campaign Finance Report | PDF | Multi-sheet Excel (Schedules C2, In-State =, E1, E4, R1) |
-| Alaska POFD Schedules | PDF | Excel workbook with POFD schedules + metadata summary |
-| Federal Financial Disclosure | PDF | Excel workbook with schedules (A�I) |
-| Pennsylvania TXT to CSV | TXT | Cleaned CSV (no blank rows) |
-| Pennsylvania Campaign Finance Report | PDF | Excel workbook from text?CSV pipeline |
+| Michigan Campaign Report Summary | PDF | Excel workbook with contributions, other receipts, in-kind contributions, fundraisers, expenditures |
+| Arizona Campaign Finance Report | PDF | Excel workbook with schedules C2, In-State <= $100, E1, E4, R1 |
+| Alaska POFD Schedules | PDF | Excel workbook containing POFD schedules and metadata summary |
+| Federal Financial Disclosure | PDF | Excel workbook with schedules A-I |
+| Pennsylvania TXT to CSV | TXT | Cleaned CSV file |
+| Pennsylvania Campaign Finance Report | PDF | Excel workbook generated through the text->CSV pipeline |
 
-## Repo Layout
+## Repository Layout
 
-`
-+- streamlit_app.py          # Streamlit UI wiring all workflows
-+- requirements.txt          # Dependencies
-+- mi_report_parser.py       # Michigan parser
-+- az_report_parser.py       # Arizona parser
-+- pa_txt_parser.py          # TXT?DataFrame helper
-+- alaska_project/
-�  +- process_pofd_reports.py
-+- disclosure_parser/
-�  +- split_schedules.py
-+- finance_pipeline/
-   +- process_reports.py
-   +- compile_pdf_to_csv.py
-   +- csv_to_workbook.py
-   +- extract_pdf_text.py
-`
+- `streamlit_app.py` – Streamlit UI that orchestrates every workflow
+- `requirements.txt` – Python dependencies
+- `mi_report_parser.py` – Michigan parser
+- `az_report_parser.py` – Arizona parser
+- `pa_txt_parser.py` – TXT to DataFrame helper for Pennsylvania exports
+- `alaska_project/process_pofd_reports.py` – Alaska POFD parser
+- `disclosure_parser/split_schedules.py` – Federal disclosure parser
+- `finance_pipeline/` – Pennsylvania text->CSV->Excel pipeline modules
 
 ## Quick Start
 
-`ash
+```bash
 pip install -r requirements.txt
 streamlit run streamlit_app.py
-`
+```
 
-1. Choose a workflow in the app.
-2. Upload the corresponding file (PDF or TXT).
-3. Check the tabbed preview.
+## Usage
+
+1. Select a workflow in the sidebar.
+2. Upload the matching file type (PDF or TXT as indicated).
+3. Review the tabbed preview (first 25 rows per sheet).
 4. Download the generated workbook or CSV.
 
-All workflows share the same preview and download patterns, so the user experience stays uniform.
+All workflows share the same preview and download pattern to keep the user experience consistent across states.
